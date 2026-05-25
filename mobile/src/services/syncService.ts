@@ -58,6 +58,8 @@ async function syncExpenses(): Promise<void> {
         categoryId: e.category_id ?? null,
         description: e.description ?? null,
         amount: e.amount,
+        supplierContractor: e.supplier_contractor ?? null,
+        receiptNo: e.receipt_no ?? null,
       });
       await updateExpenseServerId(e.id, res.data.data.id as number);
     } else if (e.pending_op === 'update' && e.server_id) {
@@ -66,6 +68,8 @@ async function syncExpenses(): Promise<void> {
         categoryId: e.category_id ?? null,
         description: e.description ?? null,
         amount: e.amount,
+        supplierContractor: e.supplier_contractor ?? null,
+        receiptNo: e.receipt_no ?? null,
       });
       await markExpenseSynced(e.id);
     } else if (e.pending_op === 'delete' && e.server_id) {

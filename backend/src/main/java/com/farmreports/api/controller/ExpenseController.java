@@ -97,6 +97,8 @@ public class ExpenseController {
         e.setYear(req.expenseDate().getYear());
         e.setMonth(req.expenseDate().getMonthValue());
         e.setReceiptUrl(req.receiptUrl());
+        e.setSupplierContractor(req.supplierContractor());
+        e.setReceiptNo(req.receiptNo());
         Claims claims = (Claims) auth.getPrincipal();
         userRepo.findByEmail(claims.getSubject()).ifPresent(e::setCreatedBy);
         return e;
@@ -107,7 +109,8 @@ public class ExpenseController {
                 e.getCategory() != null ? e.getCategory().getId() : null,
                 e.getCategory() != null ? e.getCategory().getName() : null,
                 e.getDescription(), e.getAmount(), e.getExpenseDate(),
-                e.getYear(), e.getMonth(), e.getReceiptUrl());
+                e.getYear(), e.getMonth(), e.getReceiptUrl(),
+                e.getSupplierContractor(), e.getReceiptNo());
     }
 
     private void requireAdmin(Authentication auth) {

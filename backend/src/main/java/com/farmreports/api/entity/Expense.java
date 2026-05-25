@@ -36,6 +36,12 @@ public class Expense {
     @Column(name = "receipt_url")
     private String receiptUrl;
 
+    @Column(name = "supplier_contractor")
+    private String supplierContractor;
+
+    @Column(name = "receipt_no")
+    private String receiptNo;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by")
     private User createdBy;

@@ -349,6 +349,8 @@ export async function loadExpensesFromServer(
     expenseDate: string;
     year: number;
     month: number;
+    supplierContractor?: string | null;
+    receiptNo?: string | null;
   }>,
 ): Promise<void> {
   const db = getDb();
@@ -361,10 +363,21 @@ export async function loadExpensesFromServer(
       await db.runAsync(
         `INSERT INTO local_expenses
            (server_id, year, month, expense_date, category_id, category_name, description, amount,
-            entry_no, pending_op, synced)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'update', 1)`,
+            supplier_contractor, receipt_no, entry_no, pending_op, synced)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'update', 1)`,
         [e.id, e.year, e.month, e.expenseDate, e.categoryId ?? null,
-          e.categoryName ?? null, e.description ?? null, e.amount],
+          e.categoryName ?? null, e.description ?? null, e.amount,
+          e.supplierContractor ?? null, e.receiptNo ?? null],
+      );
+    } else {
+      // Update server fields if expense already exists locally and is synced
+      await db.runAsync(
+        `UPDATE local_expenses
+         SET category_id = ?, category_name = ?, description = ?, amount = ?,
+             supplier_contractor = ?, receipt_no = ?
+         WHERE server_id = ? AND synced = 1`,
+        [e.categoryId ?? null, e.categoryName ?? null, e.description ?? null, e.amount,
+          e.supplierContractor ?? null, e.receiptNo ?? null, e.id],
       );
     }
   }

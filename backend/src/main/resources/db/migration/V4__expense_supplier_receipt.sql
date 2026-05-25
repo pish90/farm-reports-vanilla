@@ -1,0 +1,2 @@
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS supplier_contractor VARCHAR(255);
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipt_no VARCHAR(100);

@@ -9,4 +9,6 @@ import java.time.LocalDate;
 public record ExpenseRequest(Integer categoryId, String description,
                              @NotNull @Positive BigDecimal amount,
                              @NotNull LocalDate expenseDate,
-                             String receiptUrl) {}
+                             String receiptUrl,
+                             String supplierContractor,
+                             String receiptNo) {}

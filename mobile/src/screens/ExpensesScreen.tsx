@@ -425,11 +425,12 @@ export default function ExpensesScreen() {
   const [year,  setYear]  = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
 
-  const [expenses,    setExpenses]    = useState<LocalExpenseRow[]>([]);
-  const [categories,  setCategories]  = useState<ExpenseCategory[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [formVisible, setFormVisible] = useState(false);
-  const [editingExp,  setEditingExp]  = useState<LocalExpenseRow | null>(null);
+  const [expenses,      setExpenses]      = useState<LocalExpenseRow[]>([]);
+  const [categories,    setCategories]    = useState<ExpenseCategory[]>([]);
+  const [loading,       setLoading]       = useState(true);
+  const [isSubmitted,   setIsSubmitted]   = useState(false);
+  const [formVisible,   setFormVisible]   = useState(false);
+  const [editingExp,    setEditingExp]    = useState<LocalExpenseRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -443,16 +444,20 @@ export default function ExpensesScreen() {
 
     // Refresh from server in background
     try {
-      const [catRes, expRes] = await Promise.all([
+      const [catRes, expRes, reportRes] = await Promise.all([
         apiClient.get('/expenses/categories'),
         apiClient.get('/expenses', { params: { year, month } }),
+        apiClient.get('/reports', { params: { year, month } }),
       ]);
       await cacheExpenseCategories(catRes.data);
       setCategories(catRes.data);
+      setIsSubmitted(reportRes.data?.status === 'SUBMITTED');
       await loadExpensesFromServer(expRes.data.map((e: any) => ({
         id: e.id, categoryId: e.categoryId ?? null, categoryName: e.categoryName ?? null,
         description: e.description ?? null, amount: Number(e.amount),
         expenseDate: e.expenseDate, year: e.year, month: e.month,
+        supplierContractor: e.supplierContractor ?? null,
+        receiptNo: e.receiptNo ?? null,
       })));
       const refreshed = await getLocalExpenses(year, month);
       setExpenses(refreshed);
@@ -462,11 +467,13 @@ export default function ExpensesScreen() {
   useEffect(() => { load(); }, [load]);
 
   function openAdd() {
+    if (isSubmitted) return;
     setEditingExp(null);
     setFormVisible(true);
   }
 
   function openEdit(e: LocalExpenseRow) {
+    if (isSubmitted) return;
     setEditingExp(e);
     setFormVisible(true);
   }
@@ -525,21 +532,33 @@ export default function ExpensesScreen() {
 
   const total = expenses.reduce((sum, e) => sum + e.amount, 0);
 
+  const canEdit = canEditExpense && !isSubmitted;
+  const canAdd  = canAddExpense  && !isSubmitted;
+
   const renderItem = useCallback(
     ({ item }: { item: LocalExpenseRow }) => (
       <ExpenseRow
         expense={item}
-        canEdit={canEditExpense}
+        canEdit={canEdit}
         onEdit={openEdit}
         onDelete={handleDelete}
       />
     ),
-    [canEditExpense, handleDelete],
+    [canEdit, handleDelete],
   );
 
   return (
     <View style={styles.container}>
       <MonthYearSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
+
+      {isSubmitted && (
+        <View style={styles.submittedBanner}>
+          <Feather name="lock" size={13} color="#92400e" />
+          <Text style={styles.submittedBannerText}>
+            This month has been submitted. Reopen from Reports to make changes.
+          </Text>
+        </View>
+      )}
 
       {loading ? (
         <View style={styles.centered}>
@@ -556,7 +575,7 @@ export default function ExpensesScreen() {
                 <Feather name="dollar-sign" size={44} color="#ccc" />
                 <Text style={styles.emptyText}>No expenses yet</Text>
                 <Text style={styles.emptyHint}>
-                  {canAddExpense ? 'Tap + to add the first entry' : 'No expenses recorded this month.'}
+                  {canAdd ? 'Tap + to add the first entry' : 'No expenses recorded this month.'}
                 </Text>
               </View>
             }
@@ -572,7 +591,7 @@ export default function ExpensesScreen() {
             keyboardShouldPersistTaps="handled"
           />
 
-          {canAddExpense && (
+          {canAdd && (
             <TouchableOpacity style={styles.fab} onPress={openAdd} activeOpacity={0.85}>
               <Feather name="plus" size={28} color="#fff" />
             </TouchableOpacity>
@@ -597,6 +616,12 @@ export default function ExpensesScreen() {
 const styles = StyleSheet.create({
   container:      { flex: 1, backgroundColor: '#f5f7f9' },
   centered:       { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  submittedBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#fef3c7', borderBottomWidth: 1, borderBottomColor: '#fde68a',
+    paddingHorizontal: 16, paddingVertical: 10,
+  },
+  submittedBannerText: { flex: 1, fontSize: 13, color: '#92400e', lineHeight: 18 },
   listContent:    { paddingBottom: 100 },
   emptyContainer: { flex: 1 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 64 },
