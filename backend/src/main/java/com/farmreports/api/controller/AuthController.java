@@ -40,8 +40,10 @@ public class AuthController {
         claims.put("userId", user.getId());
         claims.put("name", user.getName());
         claims.put("role", user.getRole().name());
+        claims.put("mustChangePassword", user.isMustChangePassword());
         String token = jwtService.generateToken(user.getEmail(), claims);
-        return new AuthResponse(token, user.getId(), user.getName(), user.getEmail(), user.getRole().name());
+        return new AuthResponse(token, user.getId(), user.getName(), user.getEmail(),
+                user.getRole().name(), user.isMustChangePassword() ? true : null);
     }
 
     @GetMapping("/me")
@@ -63,6 +65,8 @@ public class AuthController {
         if (!passwordEncoder.matches(req.currentPassword(), user.getPasswordHash()))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
         user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
+        user.setMustChangePassword(false);
+        userRepository.save(user);
         return ApiResponse.ok(null);
     }
 }

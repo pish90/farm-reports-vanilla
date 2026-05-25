@@ -38,6 +38,7 @@ export const authService = {
       name: String(p.name ?? ''),
       email: String(p.sub ?? ''),
       role: String(p.role ?? 'WORKER') as CurrentUser['role'],
+      mustChangePassword: p.mustChangePassword === true,
     };
   },
 

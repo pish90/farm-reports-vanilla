@@ -1,5 +1,6 @@
 export type RootStackParamList = {
   Login: undefined;
+  ChangePassword: undefined;
   Main: undefined;
 };
 
@@ -32,6 +33,7 @@ export interface CurrentUser {
   name: string;
   email: string;
   role: 'ADMIN' | 'FARM_MANAGER' | 'OPS' | 'VIEWER' | 'MANAGER' | 'WORKER';
+  mustChangePassword?: boolean;
 }
 
 // ─── API response types ────────────────────────────────────────────────────────

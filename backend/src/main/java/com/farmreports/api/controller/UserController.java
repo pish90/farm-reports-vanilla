@@ -44,6 +44,7 @@ public class UserController {
         user.setEmail(req.email());
         user.setPasswordHash(passwordEncoder.encode(req.password()));
         user.setRole(UserRole.valueOf(req.role()));
+        user.setMustChangePassword(true);
         return ApiResponse.ok(toDto(userRepo.save(user)));
     }
 

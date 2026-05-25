@@ -30,6 +30,9 @@ public class User {
     @Column(nullable = false)
     private boolean active = true;
 
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 }

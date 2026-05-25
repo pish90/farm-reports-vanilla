@@ -44,9 +44,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const changePassword = useCallback(async (current: string, next: string) => {
     await authService.changePassword(current, next);
-    // Re-read user from token in case any claims changed
-    const user = await authService.getCurrentUser();
-    setState(prev => ({ ...prev, user }));
+    // Clear mustChangePassword flag immediately — no new token issued
+    setState(prev => prev.user
+      ? { ...prev, user: { ...prev.user, mustChangePassword: false } }
+      : prev,
+    );
   }, []);
 
   return (
