@@ -12,6 +12,16 @@ export type MainTabParamList = {
   Settings: undefined;
 };
 
+// Stack param lists for nested navigators
+export type AttendanceStackParamList = {
+  AttendanceHome: undefined;
+  Workers: undefined;
+};
+
+export type ExpensesStackParamList = {
+  ExpensesHome: undefined;
+};
+
 export interface CurrentUser {
   userId: number;
   name: string;
@@ -126,6 +136,15 @@ export interface LocalAttendanceRow {
   worker_id: number;
   worker_name: string;
   present: number;
+  status: string | null;   // 'P' | 'A' | 'AL' | 'SL' | 'PL' — null for legacy rows
+}
+
+export interface LocalAttendanceNoteRow {
+  id: number;
+  year: number;
+  month: number;
+  worker_id: number;
+  note: string;
 }
 
 export interface LocalStockRow {
@@ -149,6 +168,10 @@ export interface LocalExpenseRow {
   amount: number;
   pending_op: 'create' | 'update' | 'delete';
   synced: number;
+  // Extended fields (added via migration)
+  entry_no: number;
+  supplier_contractor: string | null;
+  receipt_no: string | null;
 }
 
 export interface SyncQueueRow {

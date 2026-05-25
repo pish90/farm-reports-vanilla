@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Feather } from '@expo/vector-icons';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
 import {
   ActivityIndicator,
-  Alert,
+  Animated,
+  FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,7 +17,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { Swipeable } from 'react-native-gesture-handler';
+import MonthYearSelector from '../components/shared/MonthYearSelector';
 import {
   cacheExpenseCategories,
   getCachedExpenseCategories,
@@ -27,33 +33,403 @@ import { syncAllPending } from '../services/syncService';
 import { usePermissions } from '../hooks/usePermissions';
 import type { ExpenseCategory, LocalExpenseRow } from '../types';
 
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-interface FormState {
-  expenseDate: string;
-  categoryId: number | null;
-  categoryName: string | null;
-  description: string;
-  amount: string;
+function formatDate(iso: string): string {
+  const parts = iso.split('-');
+  if (parts.length !== 3) return iso;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
 
-const EMPTY_FORM: FormState = { expenseDate: '', categoryId: null, categoryName: null, description: '', amount: '' };
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+// ─── Expense row with swipe-to-delete ────────────────────────────────────────
+
+interface RowProps {
+  expense: LocalExpenseRow;
+  canEdit: boolean;
+  onEdit: (e: LocalExpenseRow) => void;
+  onDelete: (e: LocalExpenseRow) => void;
+}
+
+function ExpenseRow({ expense, canEdit, onEdit, onDelete }: RowProps) {
+  const swipeRef = useRef<Swipeable>(null);
+
+  function renderRightActions(progress: Animated.AnimatedInterpolation<number>) {
+    const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [80, 0], extrapolate: 'clamp' });
+    return (
+      <Animated.View style={[rowStyles.deleteAction, { transform: [{ translateX }] }]}>
+        <TouchableOpacity
+          style={rowStyles.deleteBtn}
+          onPress={() => { swipeRef.current?.close(); onDelete(expense); }}
+        >
+          <Feather name="trash-2" size={18} color="#fff" />
+          <Text style={rowStyles.deleteLabel}>Delete</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  }
+
+  return (
+    <Swipeable
+      ref={swipeRef}
+      renderRightActions={canEdit ? renderRightActions : undefined}
+      overshootRight={false}
+    >
+      <TouchableOpacity style={rowStyles.row} onPress={() => canEdit && onEdit(expense)} activeOpacity={0.7}>
+        <View style={rowStyles.entryBadge}>
+          <Text style={rowStyles.entryNo}>{expense.entry_no || '—'}</Text>
+        </View>
+
+        <View style={rowStyles.body}>
+          <Text style={rowStyles.supplier} numberOfLines={1}>
+            {expense.supplier_contractor || expense.description || '—'}
+          </Text>
+          {expense.supplier_contractor && expense.description ? (
+            <Text style={rowStyles.description} numberOfLines={1}>{expense.description}</Text>
+          ) : null}
+          <Text style={rowStyles.meta} numberOfLines={1}>
+            {formatDate(expense.expense_date)}
+            {expense.category_name ? `  ·  ${expense.category_name}` : ''}
+            {expense.receipt_no ? `  ·  #${expense.receipt_no}` : ''}
+          </Text>
+          {expense.synced === 0 && <Text style={rowStyles.pending}>Pending sync</Text>}
+        </View>
+
+        <Text style={rowStyles.cost}>{expense.amount.toFixed(2)}</Text>
+        {canEdit && <Feather name="chevron-right" size={16} color="#ccc" style={{ marginLeft: 4 }} />}
+      </TouchableOpacity>
+    </Swipeable>
+  );
+}
+
+const rowStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e8e8e8',
+    minHeight: 60,
+  },
+  entryBadge: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: '#e8f5ef', alignItems: 'center', justifyContent: 'center', marginRight: 12,
+  },
+  entryNo:     { fontSize: 12, fontWeight: '700', color: '#2d6a4f' },
+  body:        { flex: 1 },
+  supplier:    { fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
+  description: { fontSize: 13, color: '#555', marginTop: 1 },
+  meta:        { fontSize: 12, color: '#888', marginTop: 2 },
+  pending:     { fontSize: 10, color: '#f59e0b', marginTop: 2 },
+  cost: {
+    fontSize: 15, fontWeight: '700', color: '#1a1a1a',
+    fontVariant: ['tabular-nums'], marginLeft: 8,
+  },
+  deleteAction: { width: 80, justifyContent: 'center', alignItems: 'center', backgroundColor: '#e53e3e' },
+  deleteBtn:    { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', gap: 3 },
+  deleteLabel:  { fontSize: 12, fontWeight: '600', color: '#fff' },
+});
+
+// ─── Expense form (bottom sheet) ──────────────────────────────────────────────
+
+interface FormValues {
+  day: string;
+  supplier_contractor: string;
+  receipt_no: string;
+  description: string;
+  amount: string;
+  category_id: number | null;
+  category_name: string | null;
+}
+
+const EMPTY_FORM: FormValues = {
+  day: '', supplier_contractor: '', receipt_no: '',
+  description: '', amount: '',
+  category_id: null, category_name: null,
+};
+
+interface FormProps {
+  visible: boolean;
+  year: number;
+  month: number;
+  initial?: FormValues;
+  isEditing: boolean;
+  categories: ExpenseCategory[];
+  onSave: (values: FormValues) => void;
+  onCancel: () => void;
+}
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+function ExpenseFormSheet({ visible, year, month, initial, isEditing, categories, onSave, onCancel }: FormProps) {
+  const [showCatPicker, setShowCatPicker] = useState(false);
+  const daysInMonth = getDaysInMonth(year, month);
+
+  const { control, handleSubmit, reset, setValue, watch, formState: { errors } } =
+    useForm<FormValues>({ defaultValues: EMPTY_FORM });
+
+  const watchedCategoryName = watch('category_name');
+
+  useEffect(() => {
+    if (visible) {
+      reset(initial ?? EMPTY_FORM);
+    } else {
+      setShowCatPicker(false);
+    }
+  }, [visible]);
+
+  function handleRequestClose() {
+    if (showCatPicker) { setShowCatPicker(false); return; }
+    onCancel();
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleRequestClose}>
+      <Pressable style={formStyles.backdrop} onPress={onCancel} />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={formStyles.kvWrap}
+        pointerEvents="box-none"
+      >
+        <View style={formStyles.sheet}>
+          <View style={formStyles.handle} />
+          <Text style={formStyles.title}>{isEditing ? 'Edit Expense' : 'New Expense'}</Text>
+          <Text style={formStyles.monthLabel}>{MONTHS[month - 1]} {year}</Text>
+
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+
+            {/* Day */}
+            <Text style={formStyles.label}>Day *</Text>
+            <Controller
+              control={control} name="day"
+              rules={{ required: 'Required', validate: v => {
+                const n = parseInt(v, 10);
+                return (!isNaN(n) && n >= 1 && n <= daysInMonth) || `Enter 1 – ${daysInMonth}`;
+              }}}
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={[formStyles.input, !!errors.day && formStyles.inputError]}
+                  value={value} onChangeText={onChange} onBlur={onBlur}
+                  keyboardType="number-pad"
+                  placeholder={`1 – ${daysInMonth}`}
+                  placeholderTextColor="#bbb"
+                  maxLength={2} selectTextOnFocus
+                />
+              )}
+            />
+            {errors.day && <Text style={formStyles.errorText}>{errors.day.message}</Text>}
+
+            {/* Supplier/Vendor */}
+            <Text style={formStyles.label}>Supplier / Vendor</Text>
+            <Controller
+              control={control} name="supplier_contractor"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={formStyles.input}
+                  value={value} onChangeText={onChange} onBlur={onBlur}
+                  placeholder="e.g. Acme Suppliers"
+                  placeholderTextColor="#bbb"
+                  autoCapitalize="words" maxLength={255} returnKeyType="next"
+                />
+              )}
+            />
+
+            {/* Receipt No */}
+            <Text style={formStyles.label}>Receipt No.</Text>
+            <Controller
+              control={control} name="receipt_no"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={formStyles.input}
+                  value={value} onChangeText={onChange} onBlur={onBlur}
+                  placeholder="e.g. 145"
+                  placeholderTextColor="#bbb"
+                  maxLength={100} returnKeyType="next"
+                />
+              )}
+            />
+
+            {/* Description */}
+            <Text style={formStyles.label}>Description</Text>
+            <Controller
+              control={control} name="description"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={[formStyles.input, { minHeight: 60, textAlignVertical: 'top' }]}
+                  value={value} onChangeText={onChange} onBlur={onBlur}
+                  placeholder="e.g. Feed, maintenance supplies…"
+                  placeholderTextColor="#bbb"
+                  multiline maxLength={500}
+                />
+              )}
+            />
+
+            {/* Category */}
+            <Text style={formStyles.label}>Category</Text>
+            <TouchableOpacity
+              style={formStyles.pickerButton}
+              onPress={() => { Keyboard.dismiss(); setShowCatPicker(true); }}
+              activeOpacity={0.7}
+            >
+              <Text style={watchedCategoryName ? formStyles.pickerValue : formStyles.pickerPlaceholder}>
+                {watchedCategoryName ?? 'Select category'}
+              </Text>
+              <Text style={formStyles.pickerChevron}>›</Text>
+            </TouchableOpacity>
+
+            {/* Amount */}
+            <Text style={formStyles.label}>Amount *</Text>
+            <Controller
+              control={control} name="amount"
+              rules={{ required: 'Required', validate: v => {
+                const n = parseFloat(v);
+                return (!isNaN(n) && n > 0) || 'Must be greater than 0';
+              }}}
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={[formStyles.input, !!errors.amount && formStyles.inputError]}
+                  value={value} onChangeText={onChange} onBlur={onBlur}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor="#bbb"
+                  maxLength={12} selectTextOnFocus
+                />
+              )}
+            />
+            {errors.amount && <Text style={formStyles.errorText}>{errors.amount.message}</Text>}
+
+            <View style={{ height: 8 }} />
+          </ScrollView>
+
+          <View style={formStyles.buttonRow}>
+            <TouchableOpacity style={formStyles.cancelBtn} onPress={onCancel}>
+              <Text style={formStyles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={formStyles.saveBtn} onPress={handleSubmit(onSave)}>
+              <Text style={formStyles.saveText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+
+      {/* Category picker */}
+      {Platform.OS === 'ios' ? (
+        showCatPicker ? (
+          <>
+            <Pressable style={formStyles.dropdownBackdrop} onPress={() => setShowCatPicker(false)} />
+            <View style={formStyles.dropdownSheet}>
+              <View style={formStyles.handle} />
+              <Text style={formStyles.dropdownTitle}>Select Category</Text>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                <TouchableOpacity style={formStyles.dropdownItem} onPress={() => { setValue('category_id', null); setValue('category_name', null); setShowCatPicker(false); }}>
+                  <Text style={formStyles.dropdownItemText}>— None —</Text>
+                </TouchableOpacity>
+                {categories.map(c => (
+                  <TouchableOpacity key={c.id} style={formStyles.dropdownItem} onPress={() => { setValue('category_id', c.id); setValue('category_name', c.name); setShowCatPicker(false); }}>
+                    <Text style={formStyles.dropdownItemText}>{c.name}</Text>
+                  </TouchableOpacity>
+                ))}
+                <View style={{ height: 24 }} />
+              </ScrollView>
+            </View>
+          </>
+        ) : null
+      ) : (
+        <Modal visible={showCatPicker} transparent animationType="slide" onRequestClose={() => setShowCatPicker(false)}>
+          <Pressable style={formStyles.dropdownBackdrop} onPress={() => setShowCatPicker(false)} />
+          <View style={formStyles.dropdownSheet}>
+            <View style={formStyles.handle} />
+            <Text style={formStyles.dropdownTitle}>Select Category</Text>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              <TouchableOpacity style={formStyles.dropdownItem} onPress={() => { setValue('category_id', null); setValue('category_name', null); setShowCatPicker(false); }}>
+                <Text style={formStyles.dropdownItemText}>— None —</Text>
+              </TouchableOpacity>
+              {categories.map(c => (
+                <TouchableOpacity key={c.id} style={formStyles.dropdownItem} onPress={() => { setValue('category_id', c.id); setValue('category_name', c.name); setShowCatPicker(false); }}>
+                  <Text style={formStyles.dropdownItemText}>{c.name}</Text>
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 24 }} />
+            </ScrollView>
+          </View>
+        </Modal>
+      )}
+    </Modal>
+  );
+}
+
+const formStyles = StyleSheet.create({
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
+  kvWrap:   { flex: 1, justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingHorizontal: 20, paddingBottom: 32, maxHeight: '90%',
+  },
+  handle: {
+    width: 40, height: 4, borderRadius: 2, backgroundColor: '#e0e0e0',
+    alignSelf: 'center', marginTop: 12, marginBottom: 16,
+  },
+  title:      { fontSize: 18, fontWeight: '700', color: '#1a1a1a', textAlign: 'center', marginBottom: 4 },
+  monthLabel: { fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 16 },
+  label:      { fontSize: 13, fontWeight: '600', color: '#555', marginTop: 14, marginBottom: 5 },
+  input: {
+    borderWidth: 1, borderColor: '#ddd', borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 10, fontSize: 15,
+    color: '#1a1a1a', backgroundColor: '#fafafa',
+  },
+  inputError: { borderColor: '#e53e3e' },
+  errorText:  { fontSize: 12, color: '#e53e3e', marginTop: 3 },
+
+  pickerButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderWidth: 1, borderColor: '#ddd', borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 12, backgroundColor: '#fafafa',
+  },
+  pickerValue:       { fontSize: 15, color: '#1a1a1a', flex: 1 },
+  pickerPlaceholder: { fontSize: 15, color: '#bbb', flex: 1 },
+  pickerChevron:     { fontSize: 20, color: '#aaa', marginLeft: 8 },
+
+  dropdownBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 50, elevation: 10 },
+  dropdownSheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    maxHeight: '70%', paddingBottom: 16, zIndex: 100, elevation: 20,
+  },
+  dropdownTitle: {
+    fontSize: 16, fontWeight: '700', color: '#1a1a1a', textAlign: 'center',
+    paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee',
+  },
+  dropdownItem: {
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f0f0f0',
+  },
+  dropdownItemText: { fontSize: 15, color: '#1a1a1a' },
+
+  buttonRow: { flexDirection: 'row', gap: 12, marginTop: 20 },
+  cancelBtn: { flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
+  cancelText: { fontSize: 15, fontWeight: '600', color: '#666' },
+  saveBtn:    { flex: 1, backgroundColor: '#2d6a4f', borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
+  saveText:   { fontSize: 15, fontWeight: '700', color: '#fff' },
+});
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function ExpensesScreen() {
   const { canAddExpense, canEditExpense } = usePermissions();
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
+  const [year,  setYear]  = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [expenses, setExpenses] = useState<LocalExpenseRow[]>([]);
-  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
-  const [catPickerVisible, setCatPickerVisible] = useState(false);
 
-  const defaultDate = `${year}-${String(month).padStart(2, '0')}-01`;
+  const [expenses,    setExpenses]    = useState<LocalExpenseRow[]>([]);
+  const [categories,  setCategories]  = useState<ExpenseCategory[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [formVisible, setFormVisible] = useState(false);
+  const [editingExp,  setEditingExp]  = useState<LocalExpenseRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,6 +441,7 @@ export default function ExpensesScreen() {
     setExpenses(local);
     setLoading(false);
 
+    // Refresh from server in background
     try {
       const [catRes, expRes] = await Promise.all([
         apiClient.get('/expenses/categories'),
@@ -73,14 +450,9 @@ export default function ExpensesScreen() {
       await cacheExpenseCategories(catRes.data);
       setCategories(catRes.data);
       await loadExpensesFromServer(expRes.data.map((e: any) => ({
-        id: e.id,
-        categoryId: e.categoryId ?? null,
-        categoryName: e.categoryName ?? null,
-        description: e.description ?? null,
-        amount: Number(e.amount),
-        expenseDate: e.expenseDate,
-        year: e.year,
-        month: e.month,
+        id: e.id, categoryId: e.categoryId ?? null, categoryName: e.categoryName ?? null,
+        description: e.description ?? null, amount: Number(e.amount),
+        expenseDate: e.expenseDate, year: e.year, month: e.month,
       })));
       const refreshed = await getLocalExpenses(year, month);
       setExpenses(refreshed);
@@ -90,189 +462,158 @@ export default function ExpensesScreen() {
   useEffect(() => { load(); }, [load]);
 
   function openAdd() {
-    setEditingId(null);
-    setForm({ ...EMPTY_FORM, expenseDate: defaultDate });
-    setModalVisible(true);
+    setEditingExp(null);
+    setFormVisible(true);
   }
 
   function openEdit(e: LocalExpenseRow) {
-    setEditingId(e.id);
-    setForm({
-      expenseDate: e.expense_date,
-      categoryId: e.category_id,
-      categoryName: e.category_name,
-      description: e.description ?? '',
-      amount: String(e.amount),
-    });
-    setModalVisible(true);
+    setEditingExp(e);
+    setFormVisible(true);
   }
 
-  async function handleSave() {
-    const amt = parseFloat(form.amount);
-    if (!form.expenseDate || isNaN(amt) || amt <= 0) {
-      Alert.alert('Validation', 'Date and a valid amount are required.'); return;
-    }
-    setSaving(true);
+  const getInitialValues = (): FormValues | undefined => {
+    if (!editingExp) return undefined;
+    const dateParts = editingExp.expense_date.split('-');
+    const day = dateParts.length === 3 ? String(parseInt(dateParts[2], 10)) : '';
+    return {
+      day,
+      supplier_contractor: editingExp.supplier_contractor ?? '',
+      receipt_no:          editingExp.receipt_no ?? '',
+      description:         editingExp.description ?? '',
+      amount:              String(editingExp.amount),
+      category_id:         editingExp.category_id,
+      category_name:       editingExp.category_name,
+    };
+  };
+
+  const handleSave = useCallback(async (values: FormValues) => {
+    setFormVisible(false);
+    const day    = parseInt(values.day, 10);
+    const amount = parseFloat(values.amount);
+    const expenseDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
     try {
-      if (editingId == null) {
-        await insertLocalExpense(year, month, form.expenseDate, form.categoryId, form.categoryName, form.description || null, amt);
+      if (editingExp) {
+        await updateLocalExpense(
+          editingExp.id, expenseDate,
+          values.category_id, values.category_name,
+          values.description || null, amount,
+          values.supplier_contractor || null, values.receipt_no || null,
+        );
       } else {
-        await updateLocalExpense(editingId, form.expenseDate, form.categoryId, form.categoryName, form.description || null, amt);
+        await insertLocalExpense(
+          year, month, expenseDate,
+          values.category_id, values.category_name,
+          values.description || null, amount,
+          values.supplier_contractor || null, values.receipt_no || null,
+        );
       }
-      setModalVisible(false);
       const refreshed = await getLocalExpenses(year, month);
       setExpenses(refreshed);
       syncAllPending().catch(() => {});
-    } finally { setSaving(false); }
-  }
+    } catch { /* user can retry */ }
+  }, [editingExp, year, month]);
 
-  async function handleDelete(id: number) {
-    Alert.alert('Delete Expense', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive', onPress: async () => {
-          await markExpenseForDelete(id);
-          const refreshed = await getLocalExpenses(year, month);
-          setExpenses(refreshed);
-          syncAllPending().catch(() => {});
-        },
-      },
-    ]);
-  }
+  const handleDelete = useCallback(async (expense: LocalExpenseRow) => {
+    try {
+      await markExpenseForDelete(expense.id);
+      const refreshed = await getLocalExpenses(year, month);
+      setExpenses(refreshed);
+      syncAllPending().catch(() => {});
+    } catch { /* ignore */ }
+  }, [year, month]);
 
   const total = expenses.reduce((sum, e) => sum + e.amount, 0);
 
-  function prevMonth() { if (month === 1) { setMonth(12); setYear(y => y - 1); } else setMonth(m => m - 1); }
-  function nextMonth() { if (month === 12) { setMonth(1); setYear(y => y + 1); } else setMonth(m => m + 1); }
-
-  if (loading) return <View style={s.center}><ActivityIndicator size="large" color="#2d6a4f" /></View>;
+  const renderItem = useCallback(
+    ({ item }: { item: LocalExpenseRow }) => (
+      <ExpenseRow
+        expense={item}
+        canEdit={canEditExpense}
+        onEdit={openEdit}
+        onDelete={handleDelete}
+      />
+    ),
+    [canEditExpense, handleDelete],
+  );
 
   return (
-    <View style={s.container}>
-      <View style={s.monthNav}>
-        <TouchableOpacity onPress={prevMonth} style={s.navBtn}><Feather name="chevron-left" size={20} color="#374151" /></TouchableOpacity>
-        <Text style={s.monthLabel}>{MONTHS[month - 1]} {year}</Text>
-        <TouchableOpacity onPress={nextMonth} style={s.navBtn}><Feather name="chevron-right" size={20} color="#374151" /></TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      <MonthYearSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
 
-      <ScrollView style={s.scroll} contentContainerStyle={s.content}>
-        {expenses.length === 0 ? (
-          <View style={s.empty}><Text style={s.emptyText}>No expenses for this month.</Text></View>
-        ) : (
-          <>
-            {expenses.map(e => (
-              <View key={e.id} style={s.expenseCard}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.expenseDate}>{e.expense_date}</Text>
-                  <Text style={s.expenseDesc} numberOfLines={1}>{e.description || e.category_name || 'Expense'}</Text>
-                  {e.category_name && e.description && <Text style={s.expenseCat}>{e.category_name}</Text>}
-                  {e.synced === 0 && <Text style={s.pending}>Pending sync</Text>}
-                </View>
-                <Text style={s.expenseAmount}>${e.amount.toFixed(2)}</Text>
-                {canEditExpense && (
-                  <>
-                    <TouchableOpacity onPress={() => openEdit(e)} style={s.iconBtn}><Feather name="edit-2" size={16} color="#6b7280" /></TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleDelete(e.id)} style={s.iconBtn}><Feather name="trash-2" size={16} color="#ef4444" /></TouchableOpacity>
-                  </>
-                )}
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#2d6a4f" />
+        </View>
+      ) : (
+        <>
+          <FlatList
+            data={expenses}
+            renderItem={renderItem}
+            keyExtractor={item => String(item.id)}
+            ListEmptyComponent={
+              <View style={styles.empty}>
+                <Feather name="dollar-sign" size={44} color="#ccc" />
+                <Text style={styles.emptyText}>No expenses yet</Text>
+                <Text style={styles.emptyHint}>
+                  {canAddExpense ? 'Tap + to add the first entry' : 'No expenses recorded this month.'}
+                </Text>
               </View>
-            ))}
-            <View style={s.totalRow}>
-              <Text style={s.totalLabel}>Total</Text>
-              <Text style={s.totalAmount}>${total.toFixed(2)}</Text>
-            </View>
-          </>
-        )}
-      </ScrollView>
+            }
+            ListFooterComponent={
+              expenses.length > 0 ? (
+                <View style={styles.totalCard}>
+                  <Text style={styles.totalLabel}>Total</Text>
+                  <Text style={styles.totalValue}>{total.toFixed(2)}</Text>
+                </View>
+              ) : null
+            }
+            contentContainerStyle={expenses.length === 0 ? styles.emptyContainer : styles.listContent}
+            keyboardShouldPersistTaps="handled"
+          />
 
-      {canAddExpense && (
-        <TouchableOpacity style={s.fab} onPress={openAdd}>
-          <Feather name="plus" size={24} color="#fff" />
-        </TouchableOpacity>
+          {canAddExpense && (
+            <TouchableOpacity style={styles.fab} onPress={openAdd} activeOpacity={0.85}>
+              <Feather name="plus" size={28} color="#fff" />
+            </TouchableOpacity>
+          )}
+        </>
       )}
 
-      {/* Add/Edit Modal */}
-      <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalVisible(false)}>
-        <KeyboardAvoidingView style={s.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={s.modalHeader}>
-            <TouchableOpacity onPress={() => setModalVisible(false)}><Text style={s.cancel}>Cancel</Text></TouchableOpacity>
-            <Text style={s.modalTitle}>{editingId == null ? 'Add Expense' : 'Edit Expense'}</Text>
-            <TouchableOpacity onPress={handleSave} disabled={saving}>
-              {saving ? <ActivityIndicator size="small" color="#2d6a4f" /> : <Text style={s.saveBtn}>Save</Text>}
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={s.modalBody}>
-            <Text style={s.fieldLabel}>Date *</Text>
-            <TextInput style={s.input} value={form.expenseDate} onChangeText={v => setForm(f => ({ ...f, expenseDate: v }))} placeholder="YYYY-MM-DD" />
-
-            <Text style={s.fieldLabel}>Category</Text>
-            <TouchableOpacity style={s.input} onPress={() => setCatPickerVisible(true)}>
-              <Text style={{ color: form.categoryName ? '#111827' : '#9ca3af' }}>{form.categoryName ?? 'Select category…'}</Text>
-            </TouchableOpacity>
-
-            <Text style={s.fieldLabel}>Description</Text>
-            <TextInput style={s.input} value={form.description} onChangeText={v => setForm(f => ({ ...f, description: v }))} placeholder="Optional description" />
-
-            <Text style={s.fieldLabel}>Amount *</Text>
-            <TextInput style={s.input} value={form.amount} onChangeText={v => setForm(f => ({ ...f, amount: v }))} keyboardType="decimal-pad" placeholder="0.00" />
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* Category picker */}
-      <Modal visible={catPickerVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setCatPickerVisible(false)}>
-        <View style={s.modal}>
-          <View style={s.modalHeader}>
-            <View />
-            <Text style={s.modalTitle}>Select Category</Text>
-            <TouchableOpacity onPress={() => setCatPickerVisible(false)}><Text style={s.cancel}>Done</Text></TouchableOpacity>
-          </View>
-          <ScrollView>
-            <TouchableOpacity style={s.catItem} onPress={() => { setForm(f => ({ ...f, categoryId: null, categoryName: null })); setCatPickerVisible(false); }}>
-              <Text style={s.catItemText}>— None —</Text>
-            </TouchableOpacity>
-            {categories.map(c => (
-              <TouchableOpacity key={c.id} style={s.catItem} onPress={() => { setForm(f => ({ ...f, categoryId: c.id, categoryName: c.name })); setCatPickerVisible(false); }}>
-                <Text style={s.catItemText}>{c.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      </Modal>
+      <ExpenseFormSheet
+        visible={formVisible}
+        year={year}
+        month={month}
+        initial={editingExp ? getInitialValues() : undefined}
+        isEditing={!!editingExp}
+        categories={categories}
+        onSave={handleSave}
+        onCancel={() => setFormVisible(false)}
+      />
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  navBtn: { padding: 8 },
-  monthLabel: { fontSize: 15, fontWeight: '700', color: '#111827', marginHorizontal: 12, minWidth: 140, textAlign: 'center' },
-  scroll: { flex: 1 },
-  content: { padding: 14, paddingBottom: 80, gap: 8 },
-  expenseCard: { backgroundColor: '#fff', borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 8, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 4, elevation: 2 },
-  expenseDate: { fontSize: 11, color: '#9ca3af', marginBottom: 2 },
-  expenseDesc: { fontSize: 14, color: '#111827', fontWeight: '500' },
-  expenseCat: { fontSize: 11, color: '#6b7280', marginTop: 2 },
-  pending: { fontSize: 10, color: '#f59e0b', marginTop: 2 },
-  expenseAmount: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  iconBtn: { padding: 6 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fff', borderRadius: 12, padding: 14, marginTop: 4 },
-  totalLabel: { fontSize: 14, fontWeight: '700', color: '#374151' },
-  totalAmount: { fontSize: 14, fontWeight: '700', color: '#2d6a4f' },
-  fab: { position: 'absolute', right: 20, bottom: 28, width: 52, height: 52, borderRadius: 26, backgroundColor: '#2d6a4f', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, elevation: 6 },
-  modal: { flex: 1, backgroundColor: '#fff' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  modalTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  cancel: { fontSize: 15, color: '#6b7280' },
-  saveBtn: { fontSize: 15, color: '#2d6a4f', fontWeight: '700' },
-  modalBody: { padding: 16 },
-  fieldLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6, marginTop: 12 },
-  input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, backgroundColor: '#fafafa' },
-  empty: { alignItems: 'center', padding: 40 },
-  emptyText: { color: '#9ca3af', fontSize: 14 },
-  catItem: { padding: 16, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  catItemText: { fontSize: 15, color: '#111827' },
+const styles = StyleSheet.create({
+  container:      { flex: 1, backgroundColor: '#f5f7f9' },
+  centered:       { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  listContent:    { paddingBottom: 100 },
+  emptyContainer: { flex: 1 },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 64 },
+  emptyText: { fontSize: 16, fontWeight: '600', color: '#aaa', marginTop: 14 },
+  emptyHint: { fontSize: 13, color: '#bbb', marginTop: 4, textAlign: 'center', marginHorizontal: 24 },
+  totalCard: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    margin: 16, paddingHorizontal: 20, paddingVertical: 16,
+    backgroundColor: '#2d6a4f', borderRadius: 12,
+  },
+  totalLabel: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  totalValue: { fontSize: 18, fontWeight: '700', color: '#fff', fontVariant: ['tabular-nums'] },
+  fab: {
+    position: 'absolute', bottom: 24, right: 24,
+    width: 58, height: 58, borderRadius: 29,
+    backgroundColor: '#2d6a4f', alignItems: 'center', justifyContent: 'center',
+    elevation: 6, shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 5,
+  },
 });

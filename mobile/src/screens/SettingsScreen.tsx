@@ -62,11 +62,20 @@ export default function SettingsScreen() {
 
 function AccountTab() {
   const { user, logout, changePassword } = useAuth();
+  const { isAdmin } = usePermissions();
+
+  // Change own password
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Admin: reset any user's password
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetPw, setResetPw] = useState('');
+  const [showResetPw, setShowResetPw] = useState(false);
+  const [resetSaving, setResetSaving] = useState(false);
 
   async function handleChangePw() {
     if (!currentPw || newPw.length < 6) {
@@ -80,6 +89,21 @@ function AccountTab() {
     } catch {
       Alert.alert('Error', 'Incorrect current password.');
     } finally { setSaving(false); }
+  }
+
+  async function handleResetPassword() {
+    if (!resetEmail.trim() || resetPw.length < 6) {
+      Alert.alert('Validation', 'Enter a valid email and a password of at least 6 characters.');
+      return;
+    }
+    setResetSaving(true);
+    try {
+      await apiClient.put('/users/reset-password', { email: resetEmail.trim(), newPassword: resetPw });
+      Alert.alert('Success', `Password reset for ${resetEmail.trim()}.`);
+      setResetEmail(''); setResetPw('');
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.message ?? 'Could not reset password.');
+    } finally { setResetSaving(false); }
   }
 
   const roleBadgeColor = { ADMIN: '#2d6a4f', FARM_MANAGER: '#0e7490', OPS: '#7c3aed', VIEWER: '#6b7280', MANAGER: '#0e7490', WORKER: '#6b7280' };
@@ -122,6 +146,49 @@ function AccountTab() {
           {saving ? <ActivityIndicator color="#fff" /> : <Text style={s.btnText}>Update Password</Text>}
         </TouchableOpacity>
       </View>
+
+      {isAdmin && (
+        <View style={s.section}>
+          <View style={s.sectionTitleRow}>
+            <Feather name="shield" size={14} color="#2d6a4f" style={{ marginRight: 6 }} />
+            <Text style={[s.sectionTitle, { marginBottom: 0 }]}>Reset User Password</Text>
+          </View>
+
+          <Text style={s.fieldLabel}>User Email</Text>
+          <TextInput
+            style={s.input}
+            value={resetEmail}
+            onChangeText={setResetEmail}
+            placeholder="user@example.com"
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+
+          <Text style={[s.fieldLabel, { marginTop: 12 }]}>New Password</Text>
+          <View style={s.pwRow}>
+            <TextInput
+              style={s.pwInput}
+              value={resetPw}
+              onChangeText={setResetPw}
+              secureTextEntry={!showResetPw}
+              placeholder="Min. 6 characters"
+            />
+            <TouchableOpacity style={s.eyeBtn} onPress={() => setShowResetPw(v => !v)}>
+              <Feather name={showResetPw ? 'eye-off' : 'eye'} size={16} color="#9ca3af" />
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={[s.btn, resetSaving && s.btnDisabled]}
+            onPress={handleResetPassword}
+            disabled={resetSaving}
+          >
+            {resetSaving
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={s.btnText}>Reset Password</Text>}
+          </TouchableOpacity>
+        </View>
+      )}
 
       <TouchableOpacity
         style={s.logoutBtn}
@@ -575,6 +642,7 @@ const s = StyleSheet.create({
   // Section
   section: { backgroundColor: '#fff', borderRadius: 12, padding: 14, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 12 },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   fieldLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
   input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, backgroundColor: '#fafafa' },
 

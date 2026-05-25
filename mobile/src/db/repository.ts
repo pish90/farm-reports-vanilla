@@ -1,6 +1,7 @@
 import { getDb } from './database';
 import type {
   LocalAttendanceRow,
+  LocalAttendanceNoteRow,
   LocalExpenseRow,
   LocalStockRow,
   StockCategory,
@@ -123,20 +124,24 @@ export async function getLocalAttendanceForDate(
   );
 }
 
+/** Upsert attendance for a single worker/day.
+ *  `status` is the full attendance code: 'P' | 'A' | 'AL' | 'SL' | 'PL'.
+ *  The `present` column stores 1 for 'P', 0 for everything else (back-compat with sync). */
 export async function upsertAttendance(
   year: number,
   month: number,
   day: number,
   workerId: number,
   workerName: string,
-  present: boolean,
+  status: string,
 ): Promise<void> {
+  const present = status === 'P' ? 1 : 0;
   await getDb().runAsync(
-    `INSERT INTO local_attendance (year, month, day_of_month, worker_id, worker_name, present)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO local_attendance (year, month, day_of_month, worker_id, worker_name, present, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (year, month, day_of_month, worker_id)
-     DO UPDATE SET present = excluded.present`,
-    [year, month, day, workerId, workerName, present ? 1 : 0],
+     DO UPDATE SET present = excluded.present, status = excluded.status`,
+    [year, month, day, workerId, workerName, present, status],
   );
 }
 
@@ -149,14 +154,39 @@ export async function loadAttendanceFromServer(records: Array<{
   const db = getDb();
   for (const r of records) {
     const [y, m, d] = r.date.split('-').map(Number);
+    const status = r.present ? 'P' : 'A';
     await db.runAsync(
-      `INSERT INTO local_attendance (year, month, day_of_month, worker_id, worker_name, present)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO local_attendance (year, month, day_of_month, worker_id, worker_name, present, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (year, month, day_of_month, worker_id)
-       DO UPDATE SET present = excluded.present`,
-      [y, m, d, r.workerId, r.workerName, r.present ? 1 : 0],
+       DO UPDATE SET present = excluded.present, status = excluded.status`,
+      [y, m, d, r.workerId, r.workerName, r.present ? 1 : 0, status],
     );
   }
+}
+
+// ─── Attendance notes (per worker per month) ─────────────────────────────────
+
+export async function getAttendanceNotes(year: number, month: number): Promise<LocalAttendanceNoteRow[]> {
+  return getDb().getAllAsync<LocalAttendanceNoteRow>(
+    'SELECT * FROM local_attendance_notes WHERE year = ? AND month = ?',
+    [year, month],
+  );
+}
+
+export async function upsertAttendanceNote(
+  year: number,
+  month: number,
+  workerId: number,
+  note: string,
+): Promise<void> {
+  await getDb().runAsync(
+    `INSERT INTO local_attendance_notes (year, month, worker_id, note)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (year, month, worker_id)
+     DO UPDATE SET note = excluded.note`,
+    [year, month, workerId, note],
+  );
 }
 
 // ─── Stock records ─────────────────────────────────────────────────────────────
@@ -209,7 +239,7 @@ export async function getLocalExpenses(year: number, month: number): Promise<Loc
   return getDb().getAllAsync<LocalExpenseRow>(
     `SELECT * FROM local_expenses
      WHERE year = ? AND month = ? AND NOT (pending_op = 'delete' AND synced = 0)
-     ORDER BY expense_date DESC`,
+     ORDER BY entry_no ASC, expense_date DESC`,
     [year, month],
   );
 }
@@ -228,11 +258,24 @@ export async function insertLocalExpense(
   categoryName: string | null,
   description: string | null,
   amount: number,
+  supplierContractor?: string | null,
+  receiptNo?: string | null,
 ): Promise<number> {
+  // Get next entry_no for this month
+  const row = await getDb().getFirstAsync<{ maxNo: number | null }>(
+    "SELECT MAX(entry_no) AS maxNo FROM local_expenses WHERE year = ? AND month = ? AND NOT (pending_op = 'delete' AND synced = 0)",
+    [year, month],
+  );
+  const entryNo = (row?.maxNo ?? 0) + 1;
+
   const result = await getDb().runAsync(
-    `INSERT INTO local_expenses (year, month, expense_date, category_id, category_name, description, amount, pending_op, synced)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'create', 0)`,
-    [year, month, expenseDate, categoryId ?? null, categoryName ?? null, description ?? null, amount],
+    `INSERT INTO local_expenses
+       (year, month, expense_date, category_id, category_name, description, amount,
+        entry_no, supplier_contractor, receipt_no, pending_op, synced)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'create', 0)`,
+    [year, month, expenseDate, categoryId ?? null, categoryName ?? null,
+      description ?? null, amount, entryNo,
+      supplierContractor ?? null, receiptNo ?? null],
   );
   return result.lastInsertRowId;
 }
@@ -244,6 +287,8 @@ export async function updateLocalExpense(
   categoryName: string | null,
   description: string | null,
   amount: number,
+  supplierContractor?: string | null,
+  receiptNo?: string | null,
 ): Promise<void> {
   const db = getDb();
   const row = await db.getFirstAsync<{ pending_op: string }>(
@@ -254,9 +299,10 @@ export async function updateLocalExpense(
   await db.runAsync(
     `UPDATE local_expenses
      SET expense_date = ?, category_id = ?, category_name = ?, description = ?, amount = ?,
-         pending_op = ?, synced = 0
+         supplier_contractor = ?, receipt_no = ?, pending_op = ?, synced = 0
      WHERE id = ?`,
-    [expenseDate, categoryId ?? null, categoryName ?? null, description ?? null, amount, newOp, localId],
+    [expenseDate, categoryId ?? null, categoryName ?? null, description ?? null, amount,
+      supplierContractor ?? null, receiptNo ?? null, newOp, localId],
   );
 }
 
@@ -280,7 +326,7 @@ export async function markExpenseForDelete(localId: number): Promise<void> {
 
 export async function updateExpenseServerId(localId: number, serverId: number): Promise<void> {
   await getDb().runAsync(
-    'UPDATE local_expenses SET server_id = ?, synced = 1, pending_op = \'update\' WHERE id = ?',
+    "UPDATE local_expenses SET server_id = ?, synced = 1, pending_op = 'update' WHERE id = ?",
     [serverId, localId],
   );
 }
@@ -314,8 +360,9 @@ export async function loadExpensesFromServer(
     if (!existing) {
       await db.runAsync(
         `INSERT INTO local_expenses
-           (server_id, year, month, expense_date, category_id, category_name, description, amount, pending_op, synced)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'update', 1)`,
+           (server_id, year, month, expense_date, category_id, category_name, description, amount,
+            entry_no, pending_op, synced)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'update', 1)`,
         [e.id, e.year, e.month, e.expenseDate, e.categoryId ?? null,
           e.categoryName ?? null, e.description ?? null, e.amount],
       );

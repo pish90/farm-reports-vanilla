@@ -7,10 +7,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import MonthYearSelector from '../components/shared/MonthYearSelector';
 import {
   cacheStockCategories,
   getCachedStockCategories,
@@ -22,8 +22,6 @@ import {
 import apiClient from '../services/apiClient';
 import { usePermissions } from '../hooks/usePermissions';
 import type { StockCategory } from '../types';
-
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 export default function StockScreen() {
   const { canUpdateStock } = usePermissions();
@@ -95,22 +93,15 @@ export default function StockScreen() {
     }, 600);
   }
 
-  function prevMonth() {
-    if (month === 1) { setMonth(12); setYear(y => y - 1); } else setMonth(m => m - 1);
-  }
-  function nextMonth() {
-    if (month === 12) { setMonth(1); setYear(y => y + 1); } else setMonth(m => m + 1);
-  }
-
   if (loading) return <View style={s.center}><ActivityIndicator size="large" color="#2d6a4f" /></View>;
 
   return (
     <KeyboardAvoidingView style={s.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={s.monthNav}>
-        <TouchableOpacity onPress={prevMonth} style={s.navBtn}><Feather name="chevron-left" size={20} color="#374151" /></TouchableOpacity>
-        <Text style={s.monthLabel}>{MONTHS[month - 1]} {year}</Text>
-        <TouchableOpacity onPress={nextMonth} style={s.navBtn}><Feather name="chevron-right" size={20} color="#374151" /></TouchableOpacity>
-      </View>
+      <MonthYearSelector
+        year={year}
+        month={month}
+        onChange={(y, m) => { setYear(y); setMonth(m); }}
+      />
 
       <ScrollView style={s.scroll} contentContainerStyle={s.content}>
         {!canUpdateStock && (
@@ -160,9 +151,6 @@ export default function StockScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  navBtn: { padding: 8 },
-  monthLabel: { fontSize: 15, fontWeight: '700', color: '#111827', marginHorizontal: 12, minWidth: 140, textAlign: 'center' },
   scroll: { flex: 1 },
   content: { padding: 14, gap: 12 },
   card: { backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },

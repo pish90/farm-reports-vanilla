@@ -1,183 +1,630 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Feather } from '@expo/vector-icons';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import MonthYearSelector from '../components/shared/MonthYearSelector';
 import {
   cacheWorkers,
   getCachedWorkers,
   getLocalAttendance,
-  loadAttendanceFromServer,
+  getAttendanceNotes,
   upsertAttendance,
+  upsertAttendanceNote,
   markAttendanceDateDirty,
+  loadAttendanceFromServer,
 } from '../db/repository';
 import apiClient from '../services/apiClient';
 import { usePermissions } from '../hooks/usePermissions';
-import type { Worker, LocalAttendanceRow } from '../types';
+import type { Worker, AttendanceStackParamList } from '../types';
 
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+type AttendanceStatus = 'P' | 'A' | 'AL' | 'SL' | 'PL';
+type AttendanceGrid  = Record<string, AttendanceStatus>;
+type NotesMap        = Record<number, string>;
 
-function daysInMonth(y: number, m: number) { return new Date(y, m, 0).getDate(); }
+const STATUS_CYCLE: AttendanceStatus[] = ['A', 'P', 'AL', 'SL', 'PL'];
+const STATUS_LABEL: Record<AttendanceStatus, string> = {
+  P: 'Present', A: 'Absent', AL: 'Annual Leave', SL: 'Sick Leave', PL: 'Parental Leave',
+};
+const STATUS_BG: Record<AttendanceStatus, string> = {
+  P: '#2d6a4f', A: '#f0f0f0', AL: '#1d4ed8', SL: '#b45309', PL: '#7c3aed',
+};
+const STATUS_TEXT: Record<AttendanceStatus, string> = {
+  P: '#fff', A: '#999', AL: '#fff', SL: '#fff', PL: '#fff',
+};
 
-export default function AttendanceScreen() {
-  const { canMarkAttendance } = usePermissions();
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [workers, setWorkers] = useState<Worker[]>([]);
-  const [attendance, setAttendance] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
-  const debounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+function cycleStatus(current: AttendanceStatus): AttendanceStatus {
+  const idx = STATUS_CYCLE.indexOf(current);
+  return STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length];
+}
 
-  const totalDays = daysInMonth(year, month);
-  const days = Array.from({ length: totalDays }, (_, i) => i + 1);
+const MONTHS = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+];
+const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
-  function key(workerId: number, day: number) { return `${workerId}-${day}`; }
+function gridKey(workerId: number, day: number): string { return `${workerId}_${day}`; }
+function getDaysInMonth(year: number, month: number): number { return new Date(year, month, 0).getDate(); }
+function getFirstDayOfWeek(year: number, month: number): number { return new Date(year, month - 1, 1).getDay(); }
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    // Load cached workers first
-    const cached = await getCachedWorkers();
-    setWorkers(cached);
+// ─── Step 1: Calendar to pick a date ─────────────────────────────────────────
 
-    // Load local attendance
-    const rows: LocalAttendanceRow[] = await getLocalAttendance(year, month);
-    const map: Record<string, boolean> = {};
-    rows.forEach(r => { map[key(r.worker_id, r.day_of_month)] = r.present === 1; });
-    setAttendance(map);
-    setLoading(false);
+interface DayPickerProps {
+  visible: boolean; year: number; month: number; markedDays: Set<number>;
+  onSelect: (day: number) => void; onClose: () => void;
+}
 
-    // Refresh from server in background
-    try {
-      const [wRes, aRes] = await Promise.all([
-        apiClient.get('/workers'),
-        apiClient.get('/attendance', { params: { year, month } }),
-      ]);
-      await cacheWorkers(wRes.data);
-      setWorkers(wRes.data);
+function DayPickerModal({ visible, year, month, markedDays, onSelect, onClose }: DayPickerProps) {
+  const daysInMonth   = getDaysInMonth(year, month);
+  const firstDow      = getFirstDayOfWeek(year, month);
+  const now           = new Date();
+  const todayDay      = now.getDate();
+  const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === month;
+  const isFutureMonth  = year > now.getFullYear() || (year === now.getFullYear() && month > now.getMonth() + 1);
 
-      const serverRecords = aRes.data as Array<{ workerId: number; workerName: string; date: string; present: boolean }>;
-      await loadAttendanceFromServer(serverRecords);
-      const fresh = await getLocalAttendance(year, month);
-      const freshMap: Record<string, boolean> = {};
-      fresh.forEach(r => { freshMap[key(r.worker_id, r.day_of_month)] = r.present === 1; });
-      setAttendance(freshMap);
-    } catch { /* stay with local data */ }
-  }, [year, month]);
-
-  useEffect(() => { load(); }, [load]);
-
-  function toggle(workerId: number, workerName: string, day: number) {
-    if (!canMarkAttendance) return;
-    const k = key(workerId, day);
-    const newVal = !(attendance[k] ?? false);
-    setAttendance(prev => ({ ...prev, [k]: newVal }));
-
-    clearTimeout(debounceRef.current[k]);
-    debounceRef.current[k] = setTimeout(async () => {
-      await upsertAttendance(year, month, day, workerId, workerName, newVal);
-      await markAttendanceDateDirty(year, month, day);
-    }, 500);
-  }
-
-  function prevMonth() {
-    if (month === 1) { setMonth(12); setYear(y => y - 1); } else setMonth(m => m - 1);
-  }
-  function nextMonth() {
-    if (month === 12) { setMonth(1); setYear(y => y + 1); } else setMonth(m => m + 1);
-  }
-
-  if (loading) return <View style={s.center}><ActivityIndicator size="large" color="#2d6a4f" /></View>;
+  const cells: Array<number | null> = [
+    ...Array.from({ length: firstDow }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
 
   return (
-    <View style={s.container}>
-      {/* Month nav */}
-      <View style={s.monthNav}>
-        <TouchableOpacity onPress={prevMonth} style={s.navBtn}><Feather name="chevron-left" size={20} color="#374151" /></TouchableOpacity>
-        <Text style={s.monthLabel}>{MONTHS[month - 1]} {year}</Text>
-        <TouchableOpacity onPress={nextMonth} style={s.navBtn}><Feather name="chevron-right" size={20} color="#374151" /></TouchableOpacity>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} />
+      <View style={styles.pickerSheet}>
+        <View style={styles.handle} />
+        <Text style={styles.sheetTitle}>Daily Register</Text>
+        <Text style={styles.sheetSubtitle}>{MONTHS[month - 1]} {year} — select a date</Text>
+        <View style={styles.dowRow}>
+          {DAY_LABELS.map(l => <Text key={l} style={styles.dowLabel}>{l}</Text>)}
+        </View>
+        <View style={styles.calGrid}>
+          {cells.map((day, idx) => {
+            if (!day) return <View key={`e-${idx}`} style={styles.calCell} />;
+            const hasAtt  = markedDays.has(day);
+            const isToday = isCurrentMonth && day === todayDay;
+            const isFuture = isFutureMonth || (isCurrentMonth && day > todayDay);
+            return (
+              <View key={day} style={[styles.calCell, isFuture && styles.calDayFuture]}>
+                <TouchableOpacity
+                  style={[styles.calDayBtn, hasAtt && styles.calDayMarked, !hasAtt && isToday && styles.calDayToday]}
+                  onPress={() => { onSelect(day); onClose(); }}
+                  activeOpacity={0.7}
+                  disabled={isFuture}
+                >
+                  <Text style={[styles.calDayNum, hasAtt && styles.calDayNumMarked, !hasAtt && isToday && styles.calDayNumToday]}>{day}</Text>
+                  {hasAtt && <View style={styles.calDot} />}
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+        </View>
+        <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
+          <Text style={styles.closeBtnText}>Cancel</Text>
+        </TouchableOpacity>
       </View>
-
-      {workers.length === 0 ? (
-        <View style={s.empty}><Text style={s.emptyText}>No workers found. Add workers in Settings.</Text></View>
-      ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View>
-            {/* Header row */}
-            <View style={s.headerRow}>
-              <View style={s.nameCol} />
-              {days.map(d => (
-                <View key={d} style={s.dayCol}>
-                  <Text style={s.dayLabel}>{d}</Text>
-                </View>
-              ))}
-              <View style={s.summaryCol}><Text style={s.dayLabel}>P</Text></View>
-            </View>
-
-            {/* Worker rows */}
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {workers.map(w => {
-                const presentCount = days.filter(d => attendance[key(w.id, d)]).length;
-                return (
-                  <View key={w.id} style={s.workerRow}>
-                    <View style={s.nameCol}><Text style={s.workerName} numberOfLines={1}>{w.name}</Text></View>
-                    {days.map(d => {
-                      const present = attendance[key(w.id, d)] ?? false;
-                      return (
-                        <TouchableOpacity
-                          key={d}
-                          style={[s.cell, present ? s.cellPresent : s.cellAbsent, !canMarkAttendance && s.cellReadOnly]}
-                          onPress={() => toggle(w.id, w.name, d)}
-                          activeOpacity={canMarkAttendance ? 0.6 : 1}
-                        >
-                          <Text style={[s.cellText, present ? s.cellTextPresent : s.cellTextAbsent]}>
-                            {present ? 'P' : 'A'}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                    <View style={s.summaryCol}><Text style={s.summaryText}>{presentCount}</Text></View>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </ScrollView>
-      )}
-    </View>
+    </Modal>
   );
 }
 
-const CELL_SIZE = 34;
-const NAME_WIDTH = 110;
-const SUMMARY_WIDTH = 36;
+// ─── Step 2: Employee list for the selected date ──────────────────────────────
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  navBtn: { padding: 8 },
-  monthLabel: { fontSize: 15, fontWeight: '700', color: '#111827', marginHorizontal: 12, minWidth: 140, textAlign: 'center' },
-  headerRow: { flexDirection: 'row', backgroundColor: '#f9fafb', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  nameCol: { width: NAME_WIDTH, paddingHorizontal: 10, justifyContent: 'center' },
-  dayCol: { width: CELL_SIZE, alignItems: 'center', justifyContent: 'center', paddingVertical: 6 },
-  summaryCol: { width: SUMMARY_WIDTH, alignItems: 'center', justifyContent: 'center' },
-  dayLabel: { fontSize: 11, color: '#6b7280', fontWeight: '600' },
-  workerRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  workerName: { fontSize: 13, color: '#111827', paddingHorizontal: 10 },
-  cell: { width: CELL_SIZE, height: CELL_SIZE, alignItems: 'center', justifyContent: 'center', margin: 2, borderRadius: 6 },
-  cellReadOnly: { opacity: 0.75 },
-  cellPresent: { backgroundColor: '#dcfce7' },
-  cellAbsent: { backgroundColor: '#f3f4f6' },
-  cellText: { fontSize: 11, fontWeight: '700' },
-  cellTextPresent: { color: '#16a34a' },
-  cellTextAbsent: { color: '#9ca3af' },
-  summaryText: { fontSize: 13, fontWeight: '700', color: '#2d6a4f' },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  emptyText: { color: '#9ca3af', fontSize: 14, textAlign: 'center' },
+interface DayAttendanceProps {
+  visible: boolean; day: number; year: number; month: number;
+  workers: Worker[]; grid: AttendanceGrid; canToggle: boolean;
+  onToggle: (workerId: number, workerName: string, day: number) => void;
+  onClose: () => void;
+}
+
+function DayAttendanceModal({ visible, day, year, month, workers, grid, canToggle, onToggle, onClose }: DayAttendanceProps) {
+  const date    = new Date(year, month - 1, day);
+  const dayName = date.toLocaleDateString('en-GB', { weekday: 'long' });
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} />
+      <View style={styles.attSheet}>
+        <View style={styles.handle} />
+        <View style={styles.attSheetHeader}>
+          <View>
+            <Text style={styles.sheetTitle}>{dayName}</Text>
+            <Text style={styles.sheetSubtitle}>{day} {MONTHS[month - 1]} {year}</Text>
+          </View>
+          {canToggle && <Text style={styles.attHint}>Tap to cycle status</Text>}
+        </View>
+        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {workers.map(worker => {
+            const status = grid[gridKey(worker.id, day)] ?? 'A';
+            const isNonAbsent = status !== 'A';
+            return (
+              <TouchableOpacity
+                key={worker.id}
+                style={[styles.attRow, isNonAbsent && styles.attRowPresent]}
+                onPress={() => { if (canToggle) onToggle(worker.id, worker.name, day); }}
+                activeOpacity={0.75}
+                disabled={!canToggle}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.attWorkerName, isNonAbsent && styles.attWorkerNamePresent]}>{worker.name}</Text>
+                  <Text style={styles.attStatusLabel}>{STATUS_LABEL[status]}</Text>
+                </View>
+                <View style={[styles.attBadge, { backgroundColor: STATUS_BG[status] }]}>
+                  <Text style={[styles.attBadgeText, { color: STATUS_TEXT[status] }]}>{status}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+          <View style={{ height: 8 }} />
+        </ScrollView>
+        <TouchableOpacity style={styles.doneBtn} onPress={onClose}>
+          <Text style={styles.doneBtnText}>Done</Text>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Per-worker calendar card ─────────────────────────────────────────────────
+
+interface WorkerCardProps {
+  worker: Worker; year: number; month: number;
+  daysInMonth: number; firstDow: number;
+  grid: AttendanceGrid; note: string; canToggle: boolean;
+  onToggle: (workerId: number, workerName: string, day: number) => void;
+  onNoteChange: (workerId: number, note: string) => void;
+}
+
+const WorkerCard = memo(function WorkerCard({
+  worker, year, month, daysInMonth, firstDow, grid, note, canToggle, onToggle, onNoteChange,
+}: WorkerCardProps) {
+  const [noteExpanded, setNoteExpanded] = useState(false);
+
+  const now            = new Date();
+  const todayDay       = now.getDate();
+  const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === month;
+  const isFutureMonth  = year > now.getFullYear() || (year === now.getFullYear() && month > now.getMonth() + 1);
+
+  const presentCount = Array.from({ length: daysInMonth }, (_, i) => i + 1)
+    .filter(d => grid[gridKey(worker.id, d)] === 'P').length;
+  const pct = daysInMonth > 0 ? presentCount / daysInMonth : 0;
+
+  const cells: Array<number | null> = [
+    ...Array.from({ length: firstDow }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+
+  return (
+    <View style={styles.workerCard}>
+      <View style={styles.workerCardHeader}>
+        <Text style={styles.workerName}>{worker.name}</Text>
+        {worker.jobTitle ? <Text style={styles.workerJobTitle}>{worker.jobTitle}</Text> : null}
+        <View style={styles.workerRight}>
+          <View style={[styles.workerBadge, pct >= 0.8 ? styles.badgeGood : pct >= 0.5 ? styles.badgeWarn : styles.badgeLow]}>
+            <Text style={styles.workerBadgeText}>{presentCount}/{daysInMonth}</Text>
+          </View>
+          <TouchableOpacity onPress={() => setNoteExpanded(e => !e)} hitSlop={8} style={{ marginLeft: 8 }}>
+            <Feather name="message-square" size={16} color={note.trim() ? '#2d6a4f' : '#ccc'} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${pct * 100}%` as any }]} />
+      </View>
+
+      <View style={[styles.dowRow, { marginTop: 10 }]}>
+        {DAY_LABELS.map(l => <Text key={l} style={styles.dowLabel}>{l}</Text>)}
+      </View>
+
+      <View style={styles.calGrid}>
+        {cells.map((day, idx) => {
+          if (!day) return <View key={`e-${idx}`} style={styles.calCell} />;
+          const status   = grid[gridKey(worker.id, day)] ?? 'A';
+          const isToday  = isCurrentMonth && day === todayDay;
+          const isFuture = isFutureMonth || (isCurrentMonth && day > todayDay);
+          const bg       = STATUS_BG[status];
+          const textCol  = STATUS_TEXT[status];
+          return (
+            <View key={day} style={[styles.calCell, isFuture && styles.calDayFuture]}>
+              <TouchableOpacity
+                style={[styles.calDayBtn, { backgroundColor: bg }, isToday && status === 'A' && styles.calDayToday]}
+                onPress={() => { if (!isFuture && canToggle) onToggle(worker.id, worker.name, day); }}
+                activeOpacity={0.7}
+                disabled={isFuture || !canToggle}
+              >
+                <Text style={[styles.calDayTiny, { color: textCol }]}>{day}</Text>
+                {!isFuture && <Text style={[styles.calStatusLetter, { color: textCol }]}>{status}</Text>}
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+      </View>
+
+      {noteExpanded && (
+        <View style={styles.noteSection}>
+          <TextInput
+            style={[styles.noteInput, !canToggle && styles.noteInputDisabled]}
+            value={note}
+            onChangeText={t => onNoteChange(worker.id, t)}
+            placeholder="Monthly note for this worker…"
+            placeholderTextColor="#bbb"
+            multiline
+            editable={canToggle}
+            maxLength={500}
+          />
+        </View>
+      )}
+    </View>
+  );
+});
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
+type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+
+export default function AttendanceScreen() {
+  const { canMarkAttendance } = usePermissions();
+  const navigation = useNavigation<NativeStackNavigationProp<AttendanceStackParamList>>();
+  const now = new Date();
+
+  const [year,  setYear]  = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+
+  const [workers,   setWorkers]   = useState<Worker[]>([]);
+  const [grid,      setGrid]      = useState<AttendanceGrid>({});
+  const [notes,     setNotes]     = useState<NotesMap>({});
+  const [isLoaded,  setIsLoaded]  = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+
+  // Daily Register: two-step flow
+  const [showDayPicker,     setShowDayPicker]     = useState(false);
+  const [showDayAttendance, setShowDayAttendance] = useState(false);
+  const [selectedDay,       setSelectedDay]       = useState(1);
+
+  const debounceRef   = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Re-load workers whenever screen gains focus
+  useFocusEffect(
+    useCallback(() => {
+      loadWorkers();
+    }, []),
+  );
+
+  // Reload attendance when year/month changes
+  useEffect(() => {
+    if (workers.length === 0 && !isLoaded) return;
+    loadAttendance(workers);
+  }, [year, month, workers]);
+
+  async function loadWorkers() {
+    setLoadError(null);
+    try {
+      // Show cached workers immediately
+      const cached = await getCachedWorkers();
+      if (cached.length > 0) {
+        setWorkers(cached);
+        await loadAttendance(cached);
+      }
+      // Refresh from server
+      const res = await apiClient.get('/workers');
+      const fresh: Worker[] = res.data.filter((w: Worker) => w.active);
+      await cacheWorkers(res.data);
+      setWorkers(fresh);
+      await loadAttendance(fresh);
+    } catch (e: any) {
+      if (workers.length === 0) setLoadError(e.message ?? 'Failed to load workers');
+    }
+  }
+
+  async function loadAttendance(ws: Worker[]) {
+    setIsLoaded(false);
+    try {
+      // Try to refresh from server
+      try {
+        const res = await apiClient.get('/attendance', { params: { year, month } });
+        await loadAttendanceFromServer(
+          res.data.map((a: any) => ({
+            workerId: a.workerId, workerName: a.workerName,
+            date: a.date, present: a.present,
+          })),
+        );
+      } catch { /* offline — use local */ }
+
+      // Build grid from local DB
+      const rows = await getLocalAttendance(year, month);
+      const newGrid: AttendanceGrid = {};
+      for (const r of rows) {
+        newGrid[gridKey(r.worker_id, r.day_of_month)] =
+          (r.status as AttendanceStatus | null) ?? (r.present === 1 ? 'P' : 'A');
+      }
+      setGrid(newGrid);
+
+      // Load notes
+      const noteRows = await getAttendanceNotes(year, month);
+      const newNotes: NotesMap = {};
+      for (const n of noteRows) newNotes[n.worker_id] = n.note;
+      setNotes(newNotes);
+    } catch (e: any) {
+      setLoadError(e.message ?? 'Failed to load attendance');
+    } finally {
+      setIsLoaded(true);
+    }
+  }
+
+  const handleToggle = useCallback((workerId: number, workerName: string, day: number) => {
+    if (!canMarkAttendance) return;
+    const k = gridKey(workerId, day);
+    setGrid(prev => {
+      const current = prev[k] ?? 'A';
+      const next    = cycleStatus(current);
+      const updated = { ...prev, [k]: next };
+
+      // Debounced DB save
+      clearTimeout(debounceRef.current[k]);
+      debounceRef.current[k] = setTimeout(async () => {
+        setSaveState('saving');
+        try {
+          await upsertAttendance(year, month, day, workerId, workerName, next);
+          await markAttendanceDateDirty(year, month, day);
+          setSaveState('saved');
+          if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+          savedTimerRef.current = setTimeout(() => setSaveState('idle'), 2000);
+        } catch {
+          setSaveState('error');
+        }
+      }, 300);
+
+      return updated;
+    });
+  }, [canMarkAttendance, year, month]);
+
+  const handleNoteChange = useCallback((workerId: number, note: string) => {
+    setNotes(prev => ({ ...prev, [workerId]: note }));
+    clearTimeout(debounceRef.current[`note_${workerId}`]);
+    debounceRef.current[`note_${workerId}`] = setTimeout(async () => {
+      await upsertAttendanceNote(year, month, workerId, note);
+    }, 500);
+  }, [year, month]);
+
+  const daysInMonth = getDaysInMonth(year, month);
+  const firstDow    = getFirstDayOfWeek(year, month);
+
+  // Days that have at least one non-absent entry — highlighted in day picker
+  const markedDays = new Set<number>();
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (workers.some(w => {
+      const s = grid[gridKey(w.id, d)];
+      return s === 'P' || s === 'AL' || s === 'SL' || s === 'PL';
+    })) markedDays.add(d);
+  }
+
+  function openDailyRegister() {
+    const today = new Date().getDate();
+    const isThisMonth = new Date().getFullYear() === year && new Date().getMonth() + 1 === month;
+    setSelectedDay(isThisMonth ? today : 1);
+    setShowDayPicker(true);
+  }
+
+  return (
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <MonthYearSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
+
+      {/* Toolbar */}
+      <View style={styles.toolbar}>
+        {canMarkAttendance && (
+          <TouchableOpacity style={styles.toolbarBtn} onPress={() => navigation.navigate('Workers')} hitSlop={8}>
+            <Feather name="user-plus" size={14} color="#2d6a4f" />
+            <Text style={styles.toolbarBtnText}>Manage Workers</Text>
+          </TouchableOpacity>
+        )}
+
+        <View style={{ flex: 1 }} />
+
+        {saveState === 'saving' && (
+          <><ActivityIndicator size="small" color="#2d6a4f" style={{ marginRight: 4 }} /><Text style={styles.saveText}>Saving…</Text></>
+        )}
+        {saveState === 'saved' && (
+          <><Feather name="check-circle" size={14} color="#2d6a4f" style={{ marginRight: 4 }} /><Text style={[styles.saveText, { color: '#2d6a4f' }]}>Saved</Text></>
+        )}
+        {saveState === 'error' && (
+          <><Feather name="alert-circle" size={14} color="#e53e3e" style={{ marginRight: 4 }} /><Text style={[styles.saveText, { color: '#e53e3e' }]}>Save failed</Text></>
+        )}
+
+        {isLoaded && workers.length > 0 && (
+          <TouchableOpacity style={styles.dailyRegisterLink} onPress={openDailyRegister} hitSlop={6}>
+            <Feather name="calendar" size={14} color="#2d6a4f" />
+            <Text style={styles.dailyRegisterText}>Daily Register</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {loadError ? (
+        <View style={styles.centered}>
+          <Feather name="alert-triangle" size={32} color="#e53e3e" />
+          <Text style={styles.errorText}>{loadError}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => loadWorkers()}>
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : !isLoaded ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#2d6a4f" />
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+          {workers.length === 0 ? (
+            <View style={styles.centered}>
+              <Feather name="users" size={44} color="#ccc" style={{ marginBottom: 12 }} />
+              <Text style={styles.emptyText}>No active workers.</Text>
+              <Text style={styles.emptyHint}>Add workers via "Manage Workers" above.</Text>
+            </View>
+          ) : (
+            workers.map(worker => (
+              <WorkerCard
+                key={worker.id}
+                worker={worker}
+                year={year}
+                month={month}
+                daysInMonth={daysInMonth}
+                firstDow={firstDow}
+                grid={grid}
+                note={notes[worker.id] ?? ''}
+                canToggle={canMarkAttendance}
+                onToggle={handleToggle}
+                onNoteChange={handleNoteChange}
+              />
+            ))
+          )}
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      )}
+
+      <DayPickerModal
+        visible={showDayPicker}
+        year={year}
+        month={month}
+        markedDays={markedDays}
+        onSelect={day => { setSelectedDay(day); setShowDayPicker(false); setShowDayAttendance(true); }}
+        onClose={() => setShowDayPicker(false)}
+      />
+
+      <DayAttendanceModal
+        visible={showDayAttendance}
+        day={selectedDay}
+        year={year}
+        month={month}
+        workers={workers}
+        grid={grid}
+        canToggle={canMarkAttendance}
+        onToggle={handleToggle}
+        onClose={() => setShowDayAttendance(false)}
+      />
+    </KeyboardAvoidingView>
+  );
+}
+
+const CELL_SIZE = `${100 / 7}%` as const;
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f5f7f9' },
+  scroll:    { padding: 12 },
+
+  toolbar: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee',
+  },
+  toolbarBtn:     { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  toolbarBtnText: { fontSize: 13, fontWeight: '600', color: '#2d6a4f' },
+  saveText:       { fontSize: 12, color: '#888' },
+
+  dailyRegisterLink: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    marginLeft: 12, paddingHorizontal: 12, paddingVertical: 6,
+    backgroundColor: '#e8f5ef', borderRadius: 16,
+  },
+  dailyRegisterText: { fontSize: 13, fontWeight: '700', color: '#2d6a4f' },
+
+  centered:  { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, minHeight: 200 },
+  errorText: { marginTop: 12, color: '#e53e3e', textAlign: 'center', fontSize: 14 },
+  retryBtn:  { marginTop: 16, paddingHorizontal: 24, paddingVertical: 10, backgroundColor: '#2d6a4f', borderRadius: 8 },
+  retryText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  emptyText: { color: '#999', fontSize: 14, textAlign: 'center', marginTop: 4 },
+  emptyHint: { color: '#bbb', fontSize: 12, textAlign: 'center', marginTop: 4 },
+
+  // Worker cards
+  workerCard: {
+    backgroundColor: '#fff', borderRadius: 12, marginBottom: 12,
+    padding: 12, borderWidth: 1, borderColor: '#eee',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1,
+  },
+  workerCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
+  workerName:       { fontSize: 15, fontWeight: '700', color: '#1a1a1a', flex: 1 },
+  workerJobTitle:   { fontSize: 11, color: '#888', marginRight: 8, marginTop: 2 },
+  workerRight:      { flexDirection: 'row', alignItems: 'center' },
+  workerBadge:      { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 20 },
+  badgeGood:        { backgroundColor: '#D8F3DC' },
+  badgeWarn:        { backgroundColor: '#FFF3CD' },
+  badgeLow:         { backgroundColor: '#FFE5E5' },
+  workerBadgeText:  { fontSize: 12, fontWeight: '700', color: '#1a1a1a' },
+  progressTrack:    { height: 3, backgroundColor: '#f0f0f0', borderRadius: 2, overflow: 'hidden', marginBottom: 4 },
+  progressFill:     { height: 3, backgroundColor: '#52B788', borderRadius: 2 },
+
+  // Calendar grid
+  dowRow:          { flexDirection: 'row' },
+  dowLabel:        { width: CELL_SIZE, textAlign: 'center', fontSize: 10, fontWeight: '600', color: '#aaa', paddingVertical: 2 },
+  calGrid:         { flexDirection: 'row', flexWrap: 'wrap' },
+  calCell:         { width: CELL_SIZE, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', padding: 2 },
+  calDayBtn:       { flex: 1, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
+  calDayFuture:    { opacity: 0.25 },
+  calDayToday:     { borderWidth: 2, borderColor: '#2d6a4f' },
+  calDayMarked:    { backgroundColor: '#2d6a4f' },
+  calDayNum:       { fontSize: 12, fontWeight: '600', color: '#333' },
+  calDayNumMarked: { color: '#fff' },
+  calDayNumToday:  { color: '#2d6a4f' },
+  calDot:          { width: 3, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.7)', marginTop: 1 },
+  calDayTiny:      { fontSize: 9, fontWeight: '600', lineHeight: 11 },
+  calStatusLetter: { fontSize: 11, fontWeight: '800', lineHeight: 13 },
+
+  // Note
+  noteSection:       { marginTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#f0f0f0', paddingTop: 8 },
+  noteInput: {
+    borderWidth: 1, borderColor: '#ddd', borderRadius: 8,
+    padding: 8, fontSize: 13, color: '#1a1a1a',
+    backgroundColor: '#fafafa', minHeight: 44, textAlignVertical: 'top',
+  },
+  noteInputDisabled: { backgroundColor: '#f5f5f5', borderColor: '#ebebeb', color: '#bbb' },
+
+  // Modals
+  backdrop:   { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
+  handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: '#e0e0e0', alignSelf: 'center', marginTop: 12, marginBottom: 14 },
+  sheetTitle:    { fontSize: 17, fontWeight: '700', color: '#1a1a1a', textAlign: 'center', marginBottom: 2 },
+  sheetSubtitle: { fontSize: 12, color: '#aaa', textAlign: 'center', marginBottom: 14 },
+
+  // Day picker sheet
+  pickerSheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingHorizontal: 16, paddingBottom: 32,
+  },
+  closeBtn:     { marginTop: 14, paddingVertical: 13, borderRadius: 10, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' },
+  closeBtnText: { fontSize: 15, fontWeight: '600', color: '#666' },
+
+  // Day attendance sheet
+  attSheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingHorizontal: 16, paddingBottom: 32, maxHeight: '75%',
+  },
+  attSheetHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 },
+  attHint:              { fontSize: 11, color: '#aaa', fontStyle: 'italic' },
+  attRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 8, paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f0f0f0',
+    borderRadius: 8, marginBottom: 2,
+  },
+  attRowPresent:        { backgroundColor: '#F0FBF4' },
+  attWorkerName:        { fontSize: 15, fontWeight: '500', color: '#333', flex: 1 },
+  attWorkerNamePresent: { color: '#1B4332', fontWeight: '600' },
+  attStatusLabel:       { fontSize: 11, color: '#aaa', marginTop: 1 },
+  attBadge:             { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  attBadgeText:         { fontSize: 13, fontWeight: '800' },
+  doneBtn:              { marginTop: 14, backgroundColor: '#2d6a4f', borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
+  doneBtnText:          { fontSize: 15, fontWeight: '700', color: '#fff' },
 });

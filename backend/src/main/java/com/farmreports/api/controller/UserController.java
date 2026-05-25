@@ -2,6 +2,7 @@ package com.farmreports.api.controller;
 
 import com.farmreports.api.dto.ApiResponse;
 import com.farmreports.api.dto.CreateUserRequest;
+import com.farmreports.api.dto.ResetPasswordRequest;
 import com.farmreports.api.dto.UserDto;
 import com.farmreports.api.entity.User;
 import com.farmreports.api.entity.UserRole;
@@ -64,6 +65,17 @@ public class UserController {
         User user = userRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         user.setActive(true);
+        userRepo.save(user);
+        return ApiResponse.ok(null);
+    }
+
+    @Transactional
+    @PutMapping("/reset-password")
+    public ApiResponse<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest req, Authentication auth) {
+        requireAdmin(auth);
+        User user = userRepo.findByEmail(req.email())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
         userRepo.save(user);
         return ApiResponse.ok(null);
     }

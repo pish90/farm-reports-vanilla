@@ -11,6 +11,8 @@ export function getDb(): SQLite.SQLiteDatabase {
 
 export async function initDatabase(): Promise<void> {
   const db = getDb();
+
+  // Core tables — all idempotent
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
 
@@ -51,6 +53,15 @@ export async function initDatabase(): Promise<void> {
       UNIQUE (year, month, day_of_month, worker_id)
     );
 
+    CREATE TABLE IF NOT EXISTS local_attendance_notes (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      year      INTEGER NOT NULL,
+      month     INTEGER NOT NULL,
+      worker_id INTEGER NOT NULL,
+      note      TEXT NOT NULL DEFAULT '',
+      UNIQUE (year, month, worker_id)
+    );
+
     CREATE TABLE IF NOT EXISTS local_stock_records (
       id       INTEGER PRIMARY KEY AUTOINCREMENT,
       item_id  INTEGER NOT NULL,
@@ -84,4 +95,16 @@ export async function initDatabase(): Promise<void> {
       UNIQUE (section, ref_key)
     );
   `);
+
+  // Schema migrations — safe to run on every startup; ALTER TABLE fails
+  // silently if the column already exists (caught and ignored).
+  const migrations = [
+    "ALTER TABLE local_attendance ADD COLUMN status TEXT DEFAULT 'A'",
+    'ALTER TABLE local_expenses ADD COLUMN entry_no INTEGER DEFAULT 0',
+    'ALTER TABLE local_expenses ADD COLUMN supplier_contractor TEXT',
+    'ALTER TABLE local_expenses ADD COLUMN receipt_no TEXT',
+  ];
+  for (const sql of migrations) {
+    try { await db.execAsync(sql); } catch { /* column already exists — skip */ }
+  }
 }
