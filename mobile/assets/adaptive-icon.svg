@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Background (no rounded corners — Android adaptive icon handles masking) -->
+  <rect width="1024" height="1024" fill="#2d6a4f"/>
+  <!-- Leaf (slightly more centred with extra padding for Android safe zone) -->
+  <path d="M512 600 C290 555 245 360 512 175 C779 360 734 555 512 600 Z" fill="white"/>
+  <!-- Stem -->
+  <line x1="512" y1="600" x2="512" y2="645" stroke="white" stroke-width="22" stroke-linecap="round"/>
+  <!-- Report lines -->
+  <rect x="332" y="658" width="360" height="42" rx="21" fill="white"/>
+  <rect x="387" y="730" width="250" height="42" rx="21" fill="white" fill-opacity="0.65"/>
+</svg>

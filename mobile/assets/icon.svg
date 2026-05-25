@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="200" ry="200" fill="#2d6a4f"/>
+  <!-- Leaf -->
+  <path d="M512 620 C260 570 210 350 512 130 C814 350 764 570 512 620 Z" fill="white"/>
+  <!-- Stem -->
+  <line x1="512" y1="620" x2="512" y2="668" stroke="white" stroke-width="22" stroke-linecap="round"/>
+  <!-- Report lines -->
+  <rect x="312" y="682" width="400" height="42" rx="21" fill="white"/>
+  <rect x="372" y="756" width="280" height="42" rx="21" fill="white" fill-opacity="0.65"/>
+</svg>

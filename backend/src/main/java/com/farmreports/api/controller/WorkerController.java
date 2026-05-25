@@ -5,6 +5,7 @@ import com.farmreports.api.dto.WorkerDto;
 import com.farmreports.api.dto.WorkerRequest;
 import com.farmreports.api.entity.Worker;
 import com.farmreports.api.repository.WorkerRepository;
+import com.farmreports.api.security.RoleHelper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -71,8 +72,6 @@ public class WorkerController {
     }
 
     private void requireManagerOrAdmin(Authentication auth) {
-        boolean ok = auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("ROLE_MANAGER"));
-        if (!ok) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        RoleHelper.requireManager(auth);
     }
 }

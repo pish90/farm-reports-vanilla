@@ -1,3 +1,3 @@
 package com.farmreports.api.entity;
 
-public enum UserRole { ADMIN, MANAGER, WORKER }
+public enum UserRole { ADMIN, FARM_MANAGER, OPS, VIEWER, MANAGER, WORKER }

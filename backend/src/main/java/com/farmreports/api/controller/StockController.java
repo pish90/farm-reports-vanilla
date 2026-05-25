@@ -3,6 +3,7 @@ package com.farmreports.api.controller;
 import com.farmreports.api.dto.*;
 import com.farmreports.api.entity.*;
 import com.farmreports.api.repository.*;
+import com.farmreports.api.security.RoleHelper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -30,7 +31,7 @@ public class StockController {
                         c.getDisplayOrder(), c.isActive(),
                         itemRepo.findByCategoryIdAndActiveTrueOrderByDisplayOrderAsc(c.getId())
                                 .stream().map(i -> new StockItemDto(i.getId(), c.getId(),
-                                        i.getName(), i.getDisplayOrder(), i.isActive()))
+                                        i.getName(), i.getDisplayOrder(), i.isActive(), null, null))
                                 .toList()))
                 .toList();
     }
@@ -79,7 +80,7 @@ public class StockController {
         item.setDisplayOrder(dto.displayOrder());
         item = itemRepo.save(item);
         return ApiResponse.ok(new StockItemDto(item.getId(), categoryId, item.getName(),
-                item.getDisplayOrder(), item.isActive()));
+                item.getDisplayOrder(), item.isActive(), null, null));
     }
 
     @Transactional
@@ -108,7 +109,9 @@ public class StockController {
                                         .filter(r -> r.getItem().getId().equals(i.getId()))
                                         .findFirst();
                                 return new StockItemDto(i.getId(), c.getId(), i.getName(),
-                                        i.getDisplayOrder(), i.isActive());
+                                        i.getDisplayOrder(), i.isActive(),
+                                        rec.map(StockRecord::getQuantity).orElse(null),
+                                        rec.map(StockRecord::getNotes).orElse(null));
                             }).toList();
                     return new StockCategoryDto(c.getId(), c.getName(), c.getUnit(),
                             c.getDisplayOrder(), c.isActive(), items);
@@ -117,7 +120,8 @@ public class StockController {
 
     @Transactional
     @PutMapping("/records")
-    public ApiResponse<Void> saveRecords(@RequestBody StockEntryRequest req) {
+    public ApiResponse<Void> saveRecords(@RequestBody StockEntryRequest req, Authentication auth) {
+        RoleHelper.requireManager(auth);
         for (var entry : req.entries()) {
             StockItem item = itemRepo.findById(entry.itemId())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
@@ -135,7 +139,6 @@ public class StockController {
     }
 
     private void requireAdmin(Authentication auth) {
-        if (auth.getAuthorities().stream().noneMatch(a -> a.getAuthority().equals("ROLE_ADMIN")))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        RoleHelper.requireAdmin(auth);
     }
 }

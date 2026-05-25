@@ -3,6 +3,7 @@ package com.farmreports.api.controller;
 import com.farmreports.api.dto.*;
 import com.farmreports.api.entity.*;
 import com.farmreports.api.repository.*;
+import com.farmreports.api.security.RoleHelper;
 import io.jsonwebtoken.Claims;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -63,6 +64,7 @@ public class ExpenseController {
     @Transactional
     @PostMapping
     public ApiResponse<ExpenseDto> create(@Valid @RequestBody ExpenseRequest req, Authentication auth) {
+        RoleHelper.requireExpenseCreate(auth);
         Expense e = buildExpense(new Expense(), req, auth);
         return ApiResponse.ok(toDto(expenseRepo.save(e)));
     }
@@ -72,6 +74,7 @@ public class ExpenseController {
     public ApiResponse<ExpenseDto> update(@PathVariable Integer id,
                                           @Valid @RequestBody ExpenseRequest req,
                                           Authentication auth) {
+        RoleHelper.requireManager(auth);
         Expense e = expenseRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         return ApiResponse.ok(toDto(expenseRepo.save(buildExpense(e, req, auth))));
@@ -79,7 +82,8 @@ public class ExpenseController {
 
     @Transactional
     @DeleteMapping("/{id}")
-    public ApiResponse<Void> delete(@PathVariable Integer id) {
+    public ApiResponse<Void> delete(@PathVariable Integer id, Authentication auth) {
+        RoleHelper.requireManager(auth);
         expenseRepo.deleteById(id);
         return ApiResponse.ok(null);
     }
@@ -107,7 +111,6 @@ public class ExpenseController {
     }
 
     private void requireAdmin(Authentication auth) {
-        if (auth.getAuthorities().stream().noneMatch(a -> a.getAuthority().equals("ROLE_ADMIN")))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        RoleHelper.requireAdmin(auth);
     }
 }

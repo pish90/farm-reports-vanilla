@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "Farm Reports",
+    "slug": "farm-reports-vanilla",
+    "owner": "pklife",
+    "version": "1.0.0",
+    "runtimeVersion": "exposdk:54.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/fc341b25-557f-4eb9-abc7-1db575a83f42",
+      "fallbackToCacheTimeout": 0
+    },
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.farmreports.vanilla"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2d6a4f"
+      },
+      "package": "com.farmreports.vanilla",
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-sqlite"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "fc341b25-557f-4eb9-abc7-1db575a83f42"
+      }
+    },
+    "privacy": "public"
+  }
+}

@@ -6,6 +6,7 @@ import com.farmreports.api.dto.UserDto;
 import com.farmreports.api.entity.User;
 import com.farmreports.api.entity.UserRole;
 import com.farmreports.api.repository.UserRepository;
+import com.farmreports.api.security.RoleHelper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -72,7 +73,6 @@ public class UserController {
     }
 
     private void requireAdmin(Authentication auth) {
-        if (auth.getAuthorities().stream().noneMatch(a -> a.getAuthority().equals("ROLE_ADMIN")))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        RoleHelper.requireAdmin(auth);
     }
 }

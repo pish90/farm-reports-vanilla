@@ -1,0 +1,10 @@
+[build]
+# Tell Railway to use the Dockerfile inside the backend directory
+dockerfilePath = "backend/Dockerfile"
+
+[deploy]
+# Health-check Railway uses to confirm the app is up
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

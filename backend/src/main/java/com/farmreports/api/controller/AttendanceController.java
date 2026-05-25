@@ -7,9 +7,11 @@ import com.farmreports.api.entity.Attendance;
 import com.farmreports.api.entity.Worker;
 import com.farmreports.api.repository.AttendanceRepository;
 import com.farmreports.api.repository.WorkerRepository;
+import com.farmreports.api.security.RoleHelper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -34,7 +36,8 @@ public class AttendanceController {
 
     @Transactional
     @PostMapping("/bulk")
-    public ApiResponse<Void> bulkSave(@Valid @RequestBody AttendanceBulkRequest req) {
+    public ApiResponse<Void> bulkSave(@Valid @RequestBody AttendanceBulkRequest req, Authentication auth) {
+        RoleHelper.requireManager(auth);
         for (AttendanceBulkRequest.WorkerAttendance wa : req.records()) {
             Worker worker = workerRepo.findById(wa.workerId())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,

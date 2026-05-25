@@ -3,6 +3,7 @@ package com.farmreports.api.controller;
 import com.farmreports.api.dto.*;
 import com.farmreports.api.entity.*;
 import com.farmreports.api.repository.*;
+import com.farmreports.api.security.RoleHelper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -132,7 +133,6 @@ public class ReportController {
     }
 
     private void requireAdmin(Authentication auth) {
-        if (auth.getAuthorities().stream().noneMatch(a -> a.getAuthority().equals("ROLE_ADMIN")))
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        RoleHelper.requireManager(auth);
     }
 }
