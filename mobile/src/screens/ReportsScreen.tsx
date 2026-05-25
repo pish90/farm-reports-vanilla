@@ -9,14 +9,20 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import MonthYearSelector from '../components/shared/MonthYearSelector';
 import apiClient from '../services/apiClient';
 import { usePermissions } from '../hooks/usePermissions';
-import type { ReportDto } from '../types';
+import type { ReportDto, ReportsStackParamList } from '../types';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+type Nav = NativeStackNavigationProp<ReportsStackParamList, 'ReportsHome'>;
+
 export default function ReportsScreen() {
+  const navigation = useNavigation<Nav>();
   const { canSubmitReport } = usePermissions();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -74,11 +80,22 @@ export default function ReportsScreen() {
 
   return (
     <View style={s.container}>
-      <MonthYearSelector
-        year={year}
-        month={month}
-        onChange={(y, m) => { setYear(y); setMonth(m); }}
-      />
+      <View style={s.topRow}>
+        <View style={{ flex: 1 }}>
+          <MonthYearSelector
+            year={year}
+            month={month}
+            onChange={(y, m) => { setYear(y); setMonth(m); }}
+          />
+        </View>
+        <TouchableOpacity
+          style={s.summaryBtn}
+          onPress={() => navigation.navigate('Summary', { year, month })}
+          hitSlop={8}
+        >
+          <Feather name="clipboard" size={20} color="#2d6a4f" />
+        </TouchableOpacity>
+      </View>
 
       {loading ? (
         <View style={s.center}><ActivityIndicator size="large" color="#2d6a4f" /></View>
@@ -192,6 +209,8 @@ export default function ReportsScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  topRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  summaryBtn: { paddingHorizontal: 16, paddingVertical: 12 },
   scroll: { flex: 1 },
   content: { padding: 14, gap: 12 },
   statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

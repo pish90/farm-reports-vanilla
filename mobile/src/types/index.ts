@@ -22,6 +22,11 @@ export type ExpensesStackParamList = {
   ExpensesHome: undefined;
 };
 
+export type ReportsStackParamList = {
+  ReportsHome: undefined;
+  Summary: { year: number; month: number };
+};
+
 export interface CurrentUser {
   userId: number;
   name: string;
