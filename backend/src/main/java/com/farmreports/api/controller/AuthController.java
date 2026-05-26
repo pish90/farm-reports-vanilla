@@ -49,11 +49,13 @@ public class AuthController {
     @GetMapping("/me")
     public AuthResponse me(Authentication auth) {
         Claims claims = (Claims) auth.getPrincipal();
+        Boolean mustChange = Boolean.TRUE.equals(claims.get("mustChangePassword", Boolean.class));
         return new AuthResponse(null,
                 ((Number) claims.get("userId")).intValue(),
                 claims.get("name", String.class),
                 claims.getSubject(),
-                claims.get("role", String.class));
+                claims.get("role", String.class),
+                mustChange ? true : null);
     }
 
     @Transactional
