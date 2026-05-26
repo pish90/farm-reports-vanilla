@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import type { CurrentUser } from '../types';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://farm-reports-vanilla-production.up.railway.app/api';
 const TOKEN_KEY = 'auth_token';
 
 function decodePayload(token: string): Record<string, unknown> | null {

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080/api';
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://farm-reports-vanilla-production.up.railway.app/api';
 
 let _onUnauthorized: (() => void) | null = null;
 
