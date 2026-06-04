@@ -7,7 +7,8 @@
     "runtimeVersion": "exposdk:54.0.0",
     "updates": {
       "url": "https://u.expo.dev/fc341b25-557f-4eb9-abc7-1db575a83f42",
-      "fallbackToCacheTimeout": 0
+      "fallbackToCacheTimeout": 10000,
+      "checkAutomatically": "ON_LOAD"
     },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
