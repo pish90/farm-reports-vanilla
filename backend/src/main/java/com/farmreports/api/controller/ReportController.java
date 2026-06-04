@@ -1,9 +1,11 @@
 package com.farmreports.api.controller;
 
+import com.farmreports.api.config.AuditService;
 import com.farmreports.api.dto.*;
 import com.farmreports.api.entity.*;
 import com.farmreports.api.repository.*;
 import com.farmreports.api.security.RoleHelper;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -30,6 +32,7 @@ public class ReportController {
     private final StockRecordRepository stockRecordRepo;
     private final StockCategoryRepository stockCategoryRepo;
     private final StockItemRepository stockItemRepo;
+    private final AuditService auditService;
 
     @GetMapping
     public ReportDto get(@RequestParam int year, @RequestParam int month, Authentication auth) {
@@ -39,7 +42,8 @@ public class ReportController {
 
     @Transactional
     @PostMapping("/{year}/{month}/submit")
-    public ReportDto submit(@PathVariable int year, @PathVariable int month, Authentication auth) {
+    public ReportDto submit(@PathVariable int year, @PathVariable int month,
+            Authentication auth, HttpServletRequest req) {
         requireAdmin(auth);
         Report report = reportRepo.findByYearAndMonth(year, month).orElseGet(() -> {
             Report r = new Report();
@@ -50,18 +54,23 @@ public class ReportController {
         report.setStatus(ReportStatus.SUBMITTED);
         report.setSubmittedAt(Instant.now());
         reportRepo.save(report);
+        auditService.log("REPORT_SUBMITTED", auth, req,
+            "Submitted report for " + year + "-" + String.format("%02d", month), "Report", report.getId());
         return buildReport(year, month, report);
     }
 
     @Transactional
     @PostMapping("/{year}/{month}/reopen")
-    public ReportDto reopen(@PathVariable int year, @PathVariable int month, Authentication auth) {
+    public ReportDto reopen(@PathVariable int year, @PathVariable int month,
+            Authentication auth, HttpServletRequest req) {
         requireAdmin(auth);
         Report report = reportRepo.findByYearAndMonth(year, month)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         report.setStatus(ReportStatus.DRAFT);
         report.setSubmittedAt(null);
         reportRepo.save(report);
+        auditService.log("REPORT_REOPENED", auth, req,
+            "Reopened report for " + year + "-" + String.format("%02d", month), "Report", report.getId());
         return buildReport(year, month, report);
     }
 

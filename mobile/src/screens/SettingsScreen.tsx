@@ -13,9 +13,12 @@ import {
   View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import apiClient from '../services/apiClient';
 import { useAuth } from '../store/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
+import { SettingsStackParamList } from '../types';
 
 type Tab = 'account' | 'workers' | 'stock' | 'expenses' | 'users';
 
@@ -63,6 +66,7 @@ export default function SettingsScreen() {
 function AccountTab() {
   const { user, logout, changePassword } = useAuth();
   const { isAdmin } = usePermissions();
+  const navigation = useNavigation<NativeStackNavigationProp<SettingsStackParamList>>();
 
   // Change own password
   const [currentPw, setCurrentPw] = useState('');
@@ -188,6 +192,14 @@ function AccountTab() {
               : <Text style={s.btnText}>Reset Password</Text>}
           </TouchableOpacity>
         </View>
+      )}
+
+      {isAdmin && (
+        <TouchableOpacity style={s.auditLogBtn} onPress={() => navigation.navigate('AuditLog')}>
+          <Feather name="file-text" size={16} color="#2d6a4f" />
+          <Text style={s.auditLogBtnText}>Audit Log</Text>
+          <Feather name="chevron-right" size={16} color="#9ca3af" style={{ marginLeft: 'auto' }} />
+        </TouchableOpacity>
       )}
 
       <TouchableOpacity
@@ -655,6 +667,8 @@ const s = StyleSheet.create({
   btn: { backgroundColor: '#2d6a4f', borderRadius: 10, paddingVertical: 13, alignItems: 'center', marginTop: 12 },
   btnDisabled: { opacity: 0.6 },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  auditLogBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16, borderRadius: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1fae5' },
+  auditLogBtnText: { color: '#2d6a4f', fontWeight: '700', fontSize: 15 },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16, borderRadius: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#fecaca' },
   logoutText: { color: '#dc2626', fontWeight: '700', fontSize: 15 },
 

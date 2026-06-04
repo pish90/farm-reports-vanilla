@@ -15,12 +15,22 @@ export type MainTabParamList = {
 
 // Stack param lists for nested navigators
 export type AttendanceStackParamList = {
+  AttendanceLanding: undefined;
   AttendanceHome: undefined;
   Workers: undefined;
+  CasualHome: undefined;
+  CreateWorkSession: { session?: CasualWorkSessionDto; selectedCasuals?: { id: number; name: string; rateOverride?: number }[] } | undefined;
+  SelectCasuals: { currentSelection: { id: number; rateOverride?: number }[]; defaultRate: number };
+  CasualReport: undefined;
 };
 
 export type ExpensesStackParamList = {
   ExpensesHome: undefined;
+};
+
+export type SettingsStackParamList = {
+  SettingsHome: undefined;
+  AuditLog: undefined;
 };
 
 export type ReportsStackParamList = {
@@ -187,4 +197,77 @@ export interface SyncQueueRow {
   ref_key: string;
   synced: number;
   created_at: string;
+}
+
+// ─── Casual labour ────────────────────────────────────────────────────────────
+
+export interface CasualLabourerDto {
+  id: number;
+  name: string;
+  phone: string | null;
+  active: boolean;
+}
+
+export interface CasualWorkEntryDto {
+  id: number;
+  casualLabourerId: number;
+  labourerName: string;
+  rateOverride: number | null;
+  effectiveRate: number;
+}
+
+export interface CasualWorkSessionDto {
+  id: number;
+  sessionDate: string;
+  activity: string;
+  defaultDailyRate: number;
+  entries: CasualWorkEntryDto[];
+}
+
+export interface CasualLabourerReportDto {
+  labourerId: number;
+  name: string;
+  phone: string | null;
+  allTimeEarned: number;
+  allTimePaid: number;
+  balance: number;
+  workEntries: { sessionId: number; sessionDate: string; activity: string; amount: number }[];
+}
+
+export interface CreateWorkSessionRequest {
+  sessionDate: string;
+  activity: string;
+  defaultDailyRate: number;
+  entries: { casualLabourerId: number; rateOverride?: number }[];
+}
+
+// ─── Audit log ────────────────────────────────────────────────────────────────
+
+export type AuditActionType =
+  | 'LOGIN' | 'LOGIN_FAILED' | 'PASSWORD_CHANGED'
+  | 'REPORT_SUBMITTED' | 'REPORT_REOPENED' | 'REPORT_CREATED'
+  | 'ATTENDANCE_UPDATED' | 'EXPENSES_UPDATED' | 'STOCK_UPDATED'
+  | 'WORKER_ADDED' | 'WORKER_DEACTIVATED'
+  | 'CASUAL_LABOURER_ADDED' | 'CASUAL_LABOURER_DEACTIVATED'
+  | 'CASUAL_SESSION_CREATED' | 'CASUAL_SESSION_UPDATED' | 'CASUAL_SESSION_DELETED'
+  | 'CASUAL_PAYMENT_RECORDED';
+
+export interface AuditLog {
+  id: number;
+  action: AuditActionType;
+  userId: number | null;
+  userName: string | null;
+  userRole: string | null;
+  description: string | null;
+  entityType: string | null;
+  entityId: number | null;
+  ipAddress: string | null;
+  timestamp: string;
+}
+
+export interface AuditLogPage {
+  content: AuditLog[];
+  totalElements: number;
+  totalPages: number;
+  page: number;
 }

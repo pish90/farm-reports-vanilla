@@ -94,6 +94,13 @@ export async function initDatabase(): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE (section, ref_key)
     );
+
+    CREATE TABLE IF NOT EXISTS casual_labourers_cache (
+      id     INTEGER PRIMARY KEY,
+      name   TEXT NOT NULL,
+      phone  TEXT,
+      active INTEGER NOT NULL DEFAULT 1
+    );
   `);
 
   // Schema migrations — safe to run on every startup; ALTER TABLE fails
