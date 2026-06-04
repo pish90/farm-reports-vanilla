@@ -8,6 +8,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { deleteWorkSession, getWorkSessions } from '../services/casualLabourerService';
 import { AttendanceStackParamList, CasualWorkSessionDto } from '../types';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00');
@@ -20,6 +21,7 @@ function totalForSession(session: CasualWorkSessionDto): number {
 
 export default function CasualAttendanceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AttendanceStackParamList>>();
+  const insets = useSafeAreaInsets();
   const [sessions, setSessions] = useState<CasualWorkSessionDto[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
@@ -57,7 +59,7 @@ export default function CasualAttendanceScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerRow}>
         <View>
           <Text style={styles.headerLabel}>All work sessions</Text>

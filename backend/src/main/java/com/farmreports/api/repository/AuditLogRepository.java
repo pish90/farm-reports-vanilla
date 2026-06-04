@@ -11,16 +11,16 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Integer> {
 
     @Query(value = """
         SELECT * FROM audit_logs
-        WHERE  (:action IS NULL OR action     = :action)
-          AND  (:start  IS NULL OR created_at >= CAST(:start AS TIMESTAMP))
-          AND  (:end    IS NULL OR created_at <= CAST(:end   AS TIMESTAMP))
+        WHERE  (CAST(:action AS TEXT) IS NULL OR action     = CAST(:action AS TEXT))
+          AND  (CAST(:start  AS TIMESTAMP) IS NULL OR created_at >= CAST(:start AS TIMESTAMP))
+          AND  (CAST(:end    AS TIMESTAMP) IS NULL OR created_at <= CAST(:end   AS TIMESTAMP))
         ORDER BY created_at DESC
         """,
         countQuery = """
         SELECT COUNT(*) FROM audit_logs
-        WHERE  (:action IS NULL OR action     = :action)
-          AND  (:start  IS NULL OR created_at >= CAST(:start AS TIMESTAMP))
-          AND  (:end    IS NULL OR created_at <= CAST(:end   AS TIMESTAMP))
+        WHERE  (CAST(:action AS TEXT) IS NULL OR action     = CAST(:action AS TEXT))
+          AND  (CAST(:start  AS TIMESTAMP) IS NULL OR created_at >= CAST(:start AS TIMESTAMP))
+          AND  (CAST(:end    AS TIMESTAMP) IS NULL OR created_at <= CAST(:end   AS TIMESTAMP))
         """,
         nativeQuery = true)
     Page<AuditLog> findFiltered(

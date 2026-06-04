@@ -32,6 +32,7 @@ import apiClient from '../services/apiClient';
 import { syncAllPending } from '../services/syncService';
 import { usePermissions } from '../hooks/usePermissions';
 import type { ExpenseCategory, LocalExpenseRow } from '../types';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -420,6 +421,7 @@ const formStyles = StyleSheet.create({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function ExpensesScreen() {
+  const insets = useSafeAreaInsets();
   const { canAddExpense, canEditExpense } = usePermissions();
   const now = new Date();
   const [year,  setYear]  = useState(now.getFullYear());
@@ -548,7 +550,7 @@ export default function ExpensesScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <MonthYearSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
 
       {isSubmitted && (

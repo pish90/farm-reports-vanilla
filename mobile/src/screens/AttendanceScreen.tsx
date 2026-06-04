@@ -29,6 +29,7 @@ import {
 import apiClient from '../services/apiClient';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Worker, AttendanceStackParamList } from '../types';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type AttendanceStatus = 'P' | 'A' | 'AL' | 'SL' | 'PL';
 type AttendanceGrid  = Record<string, AttendanceStatus>;
@@ -275,6 +276,7 @@ const WorkerCard = memo(function WorkerCard({
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 export default function AttendanceScreen() {
+  const insets = useSafeAreaInsets();
   const { canMarkAttendance } = usePermissions();
   const navigation = useNavigation<NativeStackNavigationProp<AttendanceStackParamList>>();
   const now = new Date();
@@ -420,7 +422,7 @@ export default function AttendanceScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <KeyboardAvoidingView style={[styles.container, { paddingTop: insets.top }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <MonthYearSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
 
       {/* Toolbar */}

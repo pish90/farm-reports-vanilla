@@ -16,6 +16,7 @@ import MonthYearSelector from '../components/shared/MonthYearSelector';
 import apiClient from '../services/apiClient';
 import { usePermissions } from '../hooks/usePermissions';
 import type { ReportDto, ReportsStackParamList } from '../types';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -23,6 +24,7 @@ type Nav = NativeStackNavigationProp<ReportsStackParamList, 'ReportsHome'>;
 
 export default function ReportsScreen() {
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const { canSubmitReport } = usePermissions();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -79,7 +81,7 @@ export default function ReportsScreen() {
   const isSubmitted = report?.status === 'SUBMITTED';
 
   return (
-    <View style={s.container}>
+    <View style={[s.container, { paddingTop: insets.top }]}>
       <View style={s.topRow}>
         <View style={{ flex: 1 }}>
           <MonthYearSelector

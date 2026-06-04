@@ -3,12 +3,14 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AttendanceStackParamList } from '../types';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AttendanceLandingScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AttendanceStackParamList>>();
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top + 16 }]}>
       <Text style={styles.heading}>Attendance</Text>
       <Text style={styles.subheading}>Select a section to record attendance</Text>
 
