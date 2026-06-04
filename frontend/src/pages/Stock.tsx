@@ -22,7 +22,6 @@ export default function Stock() {
   const { data: records = [] } = useQuery<StockCategory[]>({
     queryKey: ['stock-records', year, month],
     queryFn: () => getStockRecords(year, month),
-    onSuccess: () => setQuantities({}),
   });
 
   const mutation = useMutation({

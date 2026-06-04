@@ -8,7 +8,7 @@ import {
   updateConfig,
 } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
-import type { ExpenseCategory, StockCategory, UserDto, Worker } from '../types';
+import type { ExpenseCategory, StockCategory, Worker } from '../types';
 
 interface UserDto { id: number; name: string; email: string; role: string; active: boolean; }
 
