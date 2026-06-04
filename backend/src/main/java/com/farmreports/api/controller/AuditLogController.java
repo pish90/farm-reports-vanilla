@@ -11,7 +11,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
 
@@ -32,10 +31,10 @@ public class AuditLogController {
             Authentication auth) {
         RoleHelper.requireAdmin(auth);
 
-        Instant start = startDate != null ? LocalDate.parse(startDate).atStartOfDay().toInstant(java.time.ZoneOffset.UTC) : null;
-        Instant end   = endDate   != null ? LocalDate.parse(endDate).plusDays(1).atStartOfDay().toInstant(java.time.ZoneOffset.UTC) : null;
+        // Pass date strings directly; native SQL handles NULL and casts to TIMESTAMP
+        String endStr = endDate != null ? LocalDate.parse(endDate).plusDays(1).toString() : null;
 
-        Page<AuditLog> result = auditLogRepo.findFiltered(action, start, end, PageRequest.of(page, size));
+        Page<AuditLog> result = auditLogRepo.findFiltered(action, startDate, endStr, PageRequest.of(page, size));
 
         return ApiResponse.ok(Map.of(
             "content",       result.getContent().stream().map(this::toDto).toList(),

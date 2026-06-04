@@ -99,7 +99,7 @@ function SettingsNavigator() {
       <SettingsStack.Screen
         name="AuditLog"
         component={AuditLogScreen}
-        options={{ title: 'Audit Log', ...STACK_HEADER_OPTS }}
+        options={{ headerShown: false }}
       />
     </SettingsStack.Navigator>
   );

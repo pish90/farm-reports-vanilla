@@ -12,6 +12,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auditService } from '../services/auditService';
 import { AuditActionType, AuditLog } from '../types';
 
@@ -88,7 +90,6 @@ function AuditItem({ log }: { log: AuditLog }) {
         </View>
         <Text style={styles.timestamp}>{formatTimestamp(log.timestamp)}</Text>
       </View>
-
       <View style={styles.itemMeta}>
         {log.userName ? (
           <Text style={styles.metaText}>
@@ -102,13 +103,15 @@ function AuditItem({ log }: { log: AuditLog }) {
           <Text style={styles.entity}>{log.entityType} #{log.entityId}</Text>
         ) : null}
       </View>
-
       {log.ipAddress ? <Text style={styles.ip}>{log.ipAddress}</Text> : null}
     </View>
   );
 }
 
 export default function AuditLogScreen() {
+  const navigation  = useNavigation();
+  const insets      = useSafeAreaInsets();
+
   const [logs,          setLogs]         = useState<AuditLog[]>([]);
   const [totalElements, setTotalElements] = useState(0);
   const [loading,       setLoading]      = useState(true);
@@ -180,9 +183,13 @@ export default function AuditLogScreen() {
   const hasActiveFilters = !!(actionFilter || startDate || endDate);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Header row */}
       <View style={styles.topBar}>
-        <View>
+        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={8} style={styles.backBtn}>
+          <Feather name="arrow-left" size={22} color="#1a1a1a" />
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
           <Text style={styles.title}>Audit Log</Text>
           {totalElements > 0 && !loading && (
             <Text style={styles.subtitle}>{totalElements.toLocaleString()} events</Text>
@@ -199,6 +206,7 @@ export default function AuditLogScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Active filter chips */}
       {hasActiveFilters && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
           {actionFilter ? <View style={styles.chip}><Text style={styles.chipText}>{formatAction(actionFilter)}</Text></View> : null}
@@ -230,7 +238,7 @@ export default function AuditLogScreen() {
           data={logs}
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => <AuditItem log={item} />}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 16 }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#2d6a4f" />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}
@@ -244,6 +252,7 @@ export default function AuditLogScreen() {
         />
       )}
 
+      {/* Filter modal */}
       <Modal visible={filterOpen} animationType="slide" transparent presentationStyle="overFullScreen">
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
@@ -286,7 +295,7 @@ export default function AuditLogScreen() {
               </View>
             </ScrollView>
 
-            <View style={styles.modalFooter}>
+            <View style={[styles.modalFooter, { paddingBottom: insets.bottom + 16 }]}>
               <TouchableOpacity style={styles.clearBtn} onPress={() => { setPendingAction(''); setPendingStart(''); setPendingEnd(''); }}>
                 <Text style={styles.clearBtnText}>Clear</Text>
               </TouchableOpacity>
@@ -302,26 +311,30 @@ export default function AuditLogScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f7f9' },
+  container:  { flex: 1, backgroundColor: '#f5f7f9' },
   topBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 12, paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee',
+    gap: 8,
   },
-  title:    { fontSize: 20, fontWeight: '700', color: '#1a1a1a' },
+  backBtn:  { padding: 4 },
+  title:    { fontSize: 18, fontWeight: '700', color: '#1a1a1a' },
   subtitle: { fontSize: 12, color: '#888', marginTop: 1 },
   filterBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#e8f5ef', borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 7, backgroundColor: '#e8f5ef', borderRadius: 20,
   },
   filterBtnActive:     { backgroundColor: '#2d6a4f' },
   filterBtnText:       { fontSize: 13, fontWeight: '600', color: '#2d6a4f' },
   filterBtnTextActive: { color: '#fff' },
-  chipRow:      { paddingHorizontal: 16, paddingBottom: 8, gap: 6, flexDirection: 'row' },
+  chipRow:      { paddingHorizontal: 16, paddingBottom: 8, paddingTop: 8, gap: 6, flexDirection: 'row' },
   chip:         { backgroundColor: '#d1fae5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   chipText:     { fontSize: 12, color: '#065f46', fontWeight: '500' },
   clearChip:    { backgroundColor: '#fee2e2', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   clearChipText:{ fontSize: 12, color: '#991b1b', fontWeight: '500' },
-  list:      { padding: 12, paddingTop: 4 },
+  list:      { padding: 12, paddingTop: 8 },
   centered:  { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   errorText: { marginTop: 12, color: '#e53e3e', textAlign: 'center', fontSize: 14 },
   emptyText: { marginTop: 12, color: '#aaa', fontSize: 14 },
@@ -333,9 +346,9 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1,
   },
   itemHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  actionBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  actionBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, flexShrink: 1, marginRight: 8 },
   actionText:  { fontSize: 12, fontWeight: '600' },
-  timestamp:   { fontSize: 11, color: '#999' },
+  timestamp:   { fontSize: 11, color: '#999', flexShrink: 0 },
   itemMeta:    { gap: 2 },
   metaText:    { fontSize: 13, color: '#444' },
   metaLabel:   { color: '#888' },
@@ -355,7 +368,7 @@ const styles = StyleSheet.create({
   modalBody:   { paddingHorizontal: 20, paddingTop: 16 },
   modalFooter: {
     flexDirection: 'row', gap: 12,
-    paddingHorizontal: 20, paddingVertical: 16,
+    paddingHorizontal: 20, paddingTop: 16,
     borderTopWidth: 1, borderTopColor: '#f0f0f0',
   },
   filterLabel: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 10 },

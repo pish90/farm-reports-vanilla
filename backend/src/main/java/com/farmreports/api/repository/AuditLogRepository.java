@@ -7,21 +7,26 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.time.Instant;
-
 public interface AuditLogRepository extends JpaRepository<AuditLog, Integer> {
 
-    @Query("""
-        SELECT a FROM AuditLog a
-        WHERE (:action IS NULL OR a.action = :action)
-          AND (:start  IS NULL OR a.createdAt >= :start)
-          AND (:end    IS NULL OR a.createdAt <= :end)
-        ORDER BY a.createdAt DESC
-        """)
+    @Query(value = """
+        SELECT * FROM audit_logs
+        WHERE  (:action IS NULL OR action     = :action)
+          AND  (:start  IS NULL OR created_at >= CAST(:start AS TIMESTAMP))
+          AND  (:end    IS NULL OR created_at <= CAST(:end   AS TIMESTAMP))
+        ORDER BY created_at DESC
+        """,
+        countQuery = """
+        SELECT COUNT(*) FROM audit_logs
+        WHERE  (:action IS NULL OR action     = :action)
+          AND  (:start  IS NULL OR created_at >= CAST(:start AS TIMESTAMP))
+          AND  (:end    IS NULL OR created_at <= CAST(:end   AS TIMESTAMP))
+        """,
+        nativeQuery = true)
     Page<AuditLog> findFiltered(
         @Param("action") String action,
-        @Param("start")  Instant start,
-        @Param("end")    Instant end,
+        @Param("start")  String start,
+        @Param("end")    String end,
         Pageable pageable
     );
 }
