@@ -1,6 +1,6 @@
 package com.farmreports.api.dto;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 public record AuditLogDto(
     Integer id,
@@ -12,5 +12,5 @@ public record AuditLogDto(
     String entityType,
     Integer entityId,
     String ipAddress,
-    Instant timestamp
+    LocalDateTime timestamp
 ) {}
