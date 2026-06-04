@@ -11,15 +11,25 @@
       }
     },
     "preview": {
-      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": false
+      },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://farm-reports-vanilla-production.up.railway.app/api"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://farm-reports-vanilla-production.up.railway.app/api"
-      }
+      },
+      "channel": "production"
     }
   },
   "submit": {
