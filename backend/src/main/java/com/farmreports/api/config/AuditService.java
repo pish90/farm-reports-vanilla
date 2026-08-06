@@ -2,10 +2,10 @@ package com.farmreports.api.config;
 
 import com.farmreports.api.entity.AuditLog;
 import com.farmreports.api.repository.AuditLogRepository;
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,12 +22,10 @@ public class AuditService {
         log.setEntityType(entityType);
         log.setEntityId(entityId);
 
-        if (auth != null && auth.isAuthenticated()) {
-            log.setUserName(auth.getName());
-            auth.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
-                .findFirst()
-                .ifPresent(log::setUserRole);
+        if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof Claims claims) {
+            log.setUserId(((Number) claims.get("userId")).intValue());
+            log.setUserName(claims.get("name", String.class));
+            log.setUserRole(claims.get("role", String.class));
         }
 
         if (request != null) {
